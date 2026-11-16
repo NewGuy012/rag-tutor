@@ -8,6 +8,22 @@ from pathlib import Path
 
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$")
 
+_DOC_METADATA_DEFAULTS: dict[str, tuple[str, str, int]] = {
+    "01_rag_fundamentals.md": ("foundations", "core-curriculum", 2024),
+    "02_duckdb_vectors.md": ("storage-engineering", "data-platform", 2025),
+    "03_production_rag_patterns.md": ("ml-production", "retrieval-team", 2025),
+    "04_advanced_graph_modular_rag.md": ("advanced-architecture", "graph-modular-team", 2026),
+    "custom_runbook.md": ("operations", "oncall-sre", 2026),
+}
+
+
+def infer_doc_metadata(doc_source: str) -> tuple[str, str, int]:
+    """Return `(department, author, updated_year)` metadata for a document source."""
+    return _DOC_METADATA_DEFAULTS.get(
+        Path(doc_source).name,
+        ("general", "rag-tutor", 2026),
+    )
+
 
 @dataclass
 class Chunk:
@@ -20,6 +36,9 @@ class Chunk:
     start_char: int
     end_char: int
     overlap_chars: int = 0
+    department: str = "general"
+    author: str = "rag-tutor"
+    updated_year: int = 2026
 
     @property
     def char_length(self) -> int:
@@ -60,6 +79,7 @@ def chunk_fixed_character(
     start = 0
     chunk_id = 1
     n = len(cleaned)
+    department, author, updated_year = infer_doc_metadata(doc_source)
 
     while start < n:
         end = min(start + chunk_size, n)
@@ -79,6 +99,9 @@ def chunk_fixed_character(
                     start_char=start,
                     end_char=end,
                     overlap_chars=chunk_overlap if chunk_id > 1 else 0,
+                    department=department,
+                    author=author,
+                    updated_year=updated_year,
                 )
             )
             chunk_id += 1
@@ -125,6 +148,7 @@ def chunk_markdown_sections(
 
     chunks: list[Chunk] = []
     chunk_id = 1
+    department, author, updated_year = infer_doc_metadata(doc_source)
     for sec_title, sec_text, s_start, s_end in sections:
         if len(sec_text) <= max_chunk_size:
             chunks.append(
@@ -136,6 +160,9 @@ def chunk_markdown_sections(
                     start_char=s_start,
                     end_char=s_end,
                     overlap_chars=0,
+                    department=department,
+                    author=author,
+                    updated_year=updated_year,
                 )
             )
             chunk_id += 1
@@ -156,6 +183,9 @@ def chunk_markdown_sections(
                         start_char=s_start + sc.start_char,
                         end_char=s_start + sc.end_char,
                         overlap_chars=sc.overlap_chars,
+                        department=department,
+                        author=author,
+                        updated_year=updated_year,
                     )
                 )
                 chunk_id += 1

@@ -278,6 +278,7 @@ def _(mo, sql_recipe_picker):
 
 @app.cell
 def _(
+    doc_files,
     duck_query_input,
     duck_store,
     duck_top_k,
@@ -322,7 +323,7 @@ def _(
         f"""
         ## 2. Graduating from Python Lists to DuckDB (`FLOAT[{embedder.dim}]`)
 
-        All **{indexed_count} chunks** across the 3 Markdown guides in `data/sample_docs/` are now
+        All **{indexed_count} chunks** across the {len(doc_files)} Markdown guides in `data/sample_docs/` are now
         embedded and stored in a **DuckDB** table (`rag_chunks`) with fixed-size `FLOAT[{embedder.dim}]` vectors:
 
         ```sql
@@ -332,6 +333,9 @@ def _(
             section_title VARCHAR,
             chunk_text VARCHAR,
             char_length INTEGER,
+            department VARCHAR,
+            author VARCHAR,
+            updated_year INTEGER,
             embedding FLOAT[{embedder.dim}]
         );
         ```

@@ -34,6 +34,9 @@ class DuckDBChunkRecord:
     section_title: str
     text: str
     score: float
+    department: str = "general"
+    author: str = "rag-tutor"
+    updated_year: int = 2026
 
 
 class DuckDBVectorStore:
@@ -60,6 +63,9 @@ class DuckDBVectorStore:
                 section_title VARCHAR,
                 chunk_text VARCHAR,
                 char_length INTEGER,
+                department VARCHAR,
+                author VARCHAR,
+                updated_year INTEGER,
                 embedding FLOAT[{self.embedding_dim}]
             );
             """
@@ -85,7 +91,7 @@ class DuckDBVectorStore:
         if replace:
             self.clear()
 
-        rows: list[tuple[int, str, str, str, int, list[float]]] = []
+        rows: list[tuple[int, str, str, str, int, str, str, int, list[float]]] = []
         for ch in chunks:
             cleaned = ch.text.strip()
             if len(cleaned) < 10:
@@ -102,6 +108,9 @@ class DuckDBVectorStore:
                     ch.section_title,
                     cleaned,
                     len(cleaned),
+                    ch.department,
+                    ch.author,
+                    int(ch.updated_year),
                     vec,
                 )
             )
@@ -110,8 +119,9 @@ class DuckDBVectorStore:
             self.conn.executemany(
                 """
                 INSERT OR REPLACE INTO rag_chunks
-                (chunk_id, doc_source, section_title, chunk_text, char_length, embedding)
-                VALUES (?, ?, ?, ?, ?, ?);
+                (chunk_id, doc_source, section_title, chunk_text, char_length,
+                 department, author, updated_year, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 rows,
             )
@@ -122,39 +132,110 @@ class DuckDBVectorStore:
         row = self.conn.execute("SELECT COUNT(*) FROM rag_chunks;").fetchone()
         return int(row[0]) if row else 0
 
-    def search_vector(
+    @staticmethod
+    def _build_metadata_where(
+        department: str | None = None,
+        min_year: int | None = None,
+        author: str | None = None,
+        doc_source: str | None = None,
+    ) -> tuple[str, list[Any]]:
+        """Construct a parameterized SQL `WHERE` clause for chunk metadata filters."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if department and department != "all":
+            clauses.append("department = ?")
+            params.append(department)
+        if min_year is not None:
+            clauses.append("updated_year >= ?")
+            params.append(int(min_year))
+        if author and author != "all":
+            clauses.append("author = ?")
+            params.append(author)
+        if doc_source and doc_source != "all":
+            clauses.append("doc_source = ?")
+            params.append(doc_source)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return where_sql, params
+
+    def list_metadata_values(self) -> dict[str, list[Any]]:
+        """Return sorted distinct metadata values present in `rag_chunks`."""
+        depts = [r[0] for r in self.conn.execute("SELECT DISTINCT department FROM rag_chunks ORDER BY 1;").fetchall()]
+        authors = [r[0] for r in self.conn.execute("SELECT DISTINCT author FROM rag_chunks ORDER BY 1;").fetchall()]
+        years = [int(r[0]) for r in self.conn.execute("SELECT DISTINCT updated_year FROM rag_chunks ORDER BY 1;").fetchall()]
+        docs = [r[0] for r in self.conn.execute("SELECT DISTINCT doc_source FROM rag_chunks ORDER BY 1;").fetchall()]
+        return {
+            "departments": depts,
+            "authors": authors,
+            "years": years,
+            "doc_sources": docs,
+        }
+
+    def build_filtered_vector_sql(
+        self,
+        department: str | None = None,
+        min_year: int | None = None,
+        author: str | None = None,
+        doc_source: str | None = None,
+    ) -> tuple[str, list[Any]]:
+        """Build a parameterized DuckDB SQL query with optional metadata `WHERE` filters."""
+        where_sql, params = self._build_metadata_where(
+            department=department,
+            min_year=min_year,
+            author=author,
+            doc_source=doc_source,
+        )
+        sql = (
+            "SELECT chunk_id, doc_source, section_title, chunk_text,\n"
+            "       department, author, updated_year,\n"
+            f"       array_cosine_similarity(embedding, ?::FLOAT[{self.embedding_dim}]) AS vector_score\n"
+            "FROM rag_chunks\n"
+            f"{where_sql}\n"
+            "ORDER BY vector_score DESC NULLS LAST\n"
+            "LIMIT ?;"
+        )
+        return sql, params
+
+    def search_vector_filtered(
         self,
         query: str,
         top_k: int = 5,
+        department: str | None = None,
+        min_year: int | None = None,
+        author: str | None = None,
+        doc_source: str | None = None,
+        query_vec: list[float] | None = None,
     ) -> list[DuckDBChunkRecord]:
-        """Run exact cosine similarity search in DuckDB (`array_cosine_similarity`)."""
+        """Run cosine similarity search in DuckDB with optional SQL metadata filters."""
         top_k = max(1, int(top_k))
-        query_vec = self.embed_fn(query)
-        sql = f"""
-            SELECT
-                chunk_id,
-                doc_source,
-                section_title,
-                chunk_text,
-                array_cosine_similarity(
-                    embedding,
-                    ?::FLOAT[{self.embedding_dim}]
-                ) AS vector_score
-            FROM rag_chunks
-            ORDER BY vector_score DESC NULLS LAST
-            LIMIT ?;
-        """
-        rows = self.conn.execute(sql, [query_vec, top_k]).fetchall()
+        vec = query_vec if query_vec is not None else self.embed_fn(query)
+        sql, filter_params = self.build_filtered_vector_sql(
+            department=department,
+            min_year=min_year,
+            author=author,
+            doc_source=doc_source,
+        )
+        rows = self.conn.execute(sql, [vec, *filter_params, top_k]).fetchall()
         return [
             DuckDBChunkRecord(
                 chunk_id=int(r[0]),
                 doc_source=str(r[1]),
                 section_title=str(r[2]),
                 text=str(r[3]),
-                score=float(r[4] or 0.0),
+                department=str(r[4]),
+                author=str(r[5]),
+                updated_year=int(r[6]),
+                score=float(r[7] or 0.0),
             )
             for r in rows
         ]
+
+    def search_vector(
+        self,
+        query: str,
+        top_k: int = 5,
+    ) -> list[DuckDBChunkRecord]:
+        """Run exact cosine similarity search in DuckDB (`array_cosine_similarity`)."""
+        return self.search_vector_filtered(query=query, top_k=top_k)
 
     def search_bm25(
         self,
@@ -162,15 +243,28 @@ class DuckDBVectorStore:
         top_k: int = 5,
         k1: float = 1.2,
         b: float = 0.75,
+        department: str | None = None,
+        min_year: int | None = None,
+        author: str | None = None,
+        doc_source: str | None = None,
     ) -> list[DuckDBChunkRecord]:
         """Compute Okapi BM25 (`BM25-K1-1.2`, `b=0.75`) over chunks stored in DuckDB."""
         top_k = max(1, int(top_k))
+        where_sql, params = self._build_metadata_where(
+            department=department,
+            min_year=min_year,
+            author=author,
+            doc_source=doc_source,
+        )
         rows = self.conn.execute(
-            """
-            SELECT chunk_id, doc_source, section_title, chunk_text
+            f"""
+            SELECT chunk_id, doc_source, section_title, chunk_text,
+                   department, author, updated_year
             FROM rag_chunks
+            {where_sql}
             ORDER BY chunk_id ASC;
-            """
+            """,
+            params,
         ).fetchall()
         if not rows:
             return []
@@ -178,7 +272,16 @@ class DuckDBVectorStore:
         query_terms = tokenize(query, stem=False)
         if not query_terms:
             return [
-                DuckDBChunkRecord(int(r[0]), str(r[1]), str(r[2]), str(r[3]), 0.0)
+                DuckDBChunkRecord(
+                    int(r[0]),
+                    str(r[1]),
+                    str(r[2]),
+                    str(r[3]),
+                    0.0,
+                    department=str(r[4]),
+                    author=str(r[5]),
+                    updated_year=int(r[6]),
+                )
                 for r in rows[:top_k]
             ]
 
@@ -211,6 +314,9 @@ class DuckDBVectorStore:
                     section_title=str(row[2]),
                     text=str(row[3]),
                     score=round(bm25_val, 5),
+                    department=str(row[4]),
+                    author=str(row[5]),
+                    updated_year=int(row[6]),
                 )
             )
 

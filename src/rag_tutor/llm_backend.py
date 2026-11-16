@@ -143,6 +143,23 @@ SEMANTIC_CLUSTERS: list[tuple[str, set[str]]] = [
             "character", "paragraph",
         },
     ),
+    (
+        "graph_rag_knowledge",
+        {
+            "graph", "graphrag", "knowledge", "entity", "entities", "triple",
+            "triples", "relation", "relationship", "relationships", "hop",
+            "hops", "traverse", "traversal", "subgraph", "node", "edge",
+        },
+    ),
+    (
+        "modular_query_expansion",
+        {
+            "modular", "hyde", "hypothetical", "multi-query", "expansion",
+            "expand", "convex", "linear", "normalization", "splade", "dense",
+            "sparse", "metadata", "filter", "filtering", "qdrant", "weaviate",
+            "pinecone", "elasticsearch", "cohere", "convex-alpha-70",
+        },
+    ),
 ]
 
 
