@@ -16,7 +16,12 @@ A friendly, step-by-step reference manual for **Retrieval-Augmented Generation (
    - [6.3 Agentic RAG Workflows](#63-agentic-rag-workflows)
 7. [Running Local Models on macOS with `Llama.app`](#7-running-local-models-on-macos-with-llamaapp)
 8. [Evaluating Your RAG System (The RAG Triad)](#8-evaluating-your-rag-system-the-rag-triad)
-9. [Further Reading & References](#9-further-reading--references)
+9. [Advanced Graph, Hybrid & Modular RAG Architectures](#9-advanced-graph-hybrid--modular-rag-architectures)
+   - [9.1 Stage 1: Parallel Retrieval Techniques](#91-stage-1-parallel-retrieval-techniques)
+   - [9.2 Stage 2: Score Fusion Techniques (RRF vs. Convex Combination)](#92-stage-2-score-fusion-techniques-rrf-vs-convex-combination)
+   - [9.3 Stage 3: Pre- & Post-Retrieval Refinement (Query Expansion & Reranking)](#93-stage-3-pre--post-retrieval-refinement-query-expansion--reranking)
+   - [9.4 Hybrid Vector Database Ecosystem & Weight Tuning](#94-hybrid-vector-database-ecosystem--weight-tuning)
+10. [Further Reading & References](#10-further-reading--references)
 
 ---
 
@@ -306,7 +311,94 @@ flowchart TD
 
 ---
 
-## 9. Further Reading & References
+## 9. Advanced Graph, Hybrid & Modular RAG Architectures
+
+Traditional "Naive RAG" follows a rigid linear chain (`Query -> Single Dense Vector Search -> Top-K Prompt`). **Modular RAG** replaces this single track with composable building blocks spanning **Pre-Retrieval Query Expansion**, **Parallel Retrieval**, **Score Fusion**, and **Post-Retrieval Refinement**—which you can explore interactively in [`notebooks/05_advanced_modular_graph_rag.py`](../notebooks/05_advanced_modular_graph_rag.py) and [`src/rag_tutor/modular_graph_rag.py`](../src/rag_tutor/modular_graph_rag.py).
+
+```mermaid
+flowchart LR
+    subgraph Pre["Pre-Retrieval"]
+        Q["User Query"] --> Exp["Query Expansion (Multi-Query / HyDE)"]
+    end
+
+    subgraph Stage1["Stage 1: Parallel Retrieval Engines"]
+        Exp --> Dense["Dense Vectors (OpenAI / BGE / DuckDB)"]
+        Exp --> Sparse["Sparse Search (BM25 / SPLADE)"]
+        Exp --> Graph["Knowledge Graph Traversal (GraphRAG)"]
+        Exp --> SQL["SQL / Metadata Filtering"]
+    end
+
+    subgraph Stage2["Stage 2: Score Fusion"]
+        Dense --> Fuse{"RRF vs. Convex Combination"}
+        Sparse --> Fuse
+        Graph --> Fuse
+        SQL --> Fuse
+    end
+
+    subgraph Stage3["Stage 3: Post-Retrieval Refinement"]
+        Fuse -->|"Top 15–50 Candidates"| Rerank["Cross-Encoder Reranker (Top 3–5)"]
+        Rerank --> LLM["Grounded LLM Synthesis"]
+    end
+```
+
+### 9.1 Stage 1: Parallel Retrieval Techniques
+
+At search time, a Hybrid / Modular RAG pipeline queries multiple specialized engines simultaneously so one engine covers another's blind spots:
+
+- **Dense + Sparse Search**: The most common production pairing. **Dense retrieval** uses neural embeddings (such as OpenAI `text-embedding-3` or `BAAI/bge`) to match semantic meaning, paraphrases, and synonyms. **Sparse retrieval** uses inverted-index keyword algorithms such as **Okapi BM25** or learned sparse models like **SPLADE** to match exact error codes, acronyms, part numbers, and serial numbers.
+- **Vector + Knowledge Graph Search (`GraphRAG`)**: Pairs unstructured passage similarity with **Knowledge Graph** traversal. While the vector engine pulls descriptive chunks, the graph engine walks typed `(subject, predicate, object)` relationships across 1 to 2 hops from matched query entities to retrieve structured multi-document facts (implemented in `KnowledgeGraphStore`).
+- **Vector + SQL / Metadata Filtering**: Uses structured database predicates (such as `department`, `author`, `updated_year`, or access tier) to narrow the candidate pool before or alongside vector similarity search:
+
+```sql
+-- Vector + SQL Metadata Filtering in DuckDB
+SELECT chunk_id, doc_source, section_title, department, updated_year,
+       array_cosine_similarity(embedding, $query_vec::FLOAT[128]) AS vector_score
+FROM rag_chunks
+WHERE department = 'advanced-architecture' AND updated_year >= 2026
+ORDER BY vector_score DESC
+LIMIT 5;
+```
+
+### 9.2 Stage 2: Score Fusion Techniques (RRF vs. Convex Combination)
+
+Because lexical BM25 scores (unbounded positive floats like `4.85`), dense cosine scores (`[-1.0, 1.0]`), and graph hop weights live on incompatible mathematical scales, candidate lists must be fused carefully:
+
+- **Reciprocal Rank Fusion (`RRF-K60`)**: The scale-invariant industry default. Instead of comparing raw similarity values, RRF blends each chunk's rank position across retrievers (`1 / (k + rank)`), pushing documents that rank strongly in both lists to the top without requiring score calibration.
+- **Weighted Linear Combination (Convex Combination)**: Normalizes each engine's scores onto a shared `[0.0, 1.0]` interval (e.g., via Min-Max scaling) and takes a weighted sum controlled by $\alpha \in [0, 1]$:
+
+$$\text{Convex\_Score}(d) = \alpha \cdot \hat{S}_{\text{vector}}(d) + (1 - \alpha) \cdot \hat{S}_{\text{bm25}}(d)$$
+
+For example, $\alpha = 0.7$ computes **70% Vector Score + 30% Keyword Score**.
+
+| Fusion Method | How It Blends | Strengths | Trade-offs |
+| :--- | :--- | :--- | :--- |
+| **Reciprocal Rank Fusion (`RRF`)** | Sums $\frac{\alpha}{k + r_{\text{vec}}} + \frac{1-\alpha}{k + r_{\text{bm25}}}$ | Immune to raw score outliers; zero calibration needed | Discards score magnitude gaps between Rank #1 and Rank #2 |
+| **Convex Combination** | Min-Max / Z-score normalize to `[0, 1]`, then linear blend | Preserves sharp confidence spikes (e.g., exact ID match) | Sensitive to score normalization anomalies across queries |
+
+### 9.3 Stage 3: Pre- & Post-Retrieval Refinement (Query Expansion & Reranking)
+
+- **Query Expansion (`Multi-Query` & `HyDE`)**:
+  - **Multi-Query Expansion**: Before searching, an LLM rewrites an ambiguous prompt into 3–4 complementary search variations covering different technical phrasings and merges the resulting candidate pools.
+  - **HyDE (Hypothetical Document Embeddings)**: Generates a plausible hypothetical answer passage first and embeds that passage instead of the raw question, bridging the vocabulary gap between short questions and longer answer paragraphs.
+- **Cross-Encoder Reranking (`Top-50 -> Top-5`)**: Once parallel retrieval and score fusion surface a broad candidate pool (top 15–50 chunks), a specialized reranking model (such as **Cohere Rerank**, `BAAI/bge-reranker`, or `ms-marco-MiniLM-L-6-v2`) evaluates every `(query, chunk)` pair with full cross-attention, discarding false positives and keeping only the top 3–5 passages for the LLM prompt.
+
+### 9.4 Hybrid Vector Database Ecosystem & Weight Tuning
+
+When graduating from embedded **DuckDB** to distributed production infrastructure, several vector databases support hybrid search and metadata filtering natively:
+
+| Database | Native Hybrid Engines | Built-In Fusion | Filtering & Reranking |
+| :--- | :--- | :--- | :--- |
+| **DuckDB (Embedded)** | `FLOAT[N]` Cosine + `fts` BM25 + SQL | Custom SQL / Python (`RRF` or `Convex`) | Full SQL `WHERE` joins + Python Cross-Encoder |
+| **Qdrant** | Named Dense + Sparse (`SPLADE` / BM25) vectors | Native `RRF` (`Prefetch` API) | HNSW payload filtering + custom rerank step |
+| **Weaviate** | Dense HNSW + Inverted BM25F | `rankedFusion` (`RRF`) & `relativeScoreFusion` (`Convex`) | GraphQL metadata filters + reranker modules |
+| **Pinecone** | Hybrid Dense-Sparse Indexes | Client / server alpha weighting | Metadata filter dicts + Pinecone Inference rerankers |
+| **Elasticsearch / OpenSearch** | Dense `knn` + Lucene BM25 | Native `rrf` & `linear` retrievers | Inverted filter cache + Learning-to-Rank / rerank |
+
+> **Weight-Tuning Rule of Thumb**: Use $\alpha \in [0.25, 0.40]$ when queries frequently cite exact identifiers, codes, or SKUs; $\alpha \in [0.50, 0.70]$ for balanced technical documentation; and $\alpha \in [0.75, 0.90]$ for broad paraphrased conceptual queries—always pairing broad Stage-1 recall (`Top 25–50`) with a Stage-2 Cross-Encoder reranker (`Top 3–5`).
+
+---
+
+## 10. Further Reading & References
 
 1. **Xuan-Son Nguyen (`ngxson`)** — [Code a simple RAG from scratch (Hugging Face Blog)](https://huggingface.co/blog/ngxson/make-your-own-rag)
 2. **LaunchDarkly** — [LLM RAG Tutorial: Retrieval-Augmented Generation Explained](https://launchdarkly.com/blog/llm-rag-tutorial/)
