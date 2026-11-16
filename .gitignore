@@ -1,0 +1,19 @@
+# Python & uv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Marimo
+__marimo__/
+.marimo/
+
+# DuckDB temporary files
+*.duckdb.wal
+
+# macOS
+.DS_Store
