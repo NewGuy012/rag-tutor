@@ -17,8 +17,7 @@ def _():
 
     from rag_tutor.agentic_rag import AgenticRAGPipeline
     from rag_tutor.chunker import (
-        chunk_fixed_character,
-        chunk_markdown_sections,
+        chunk_document,
         load_sample_markdown_corpus,
     )
     from rag_tutor.duckdb_store import DuckDBVectorStore
@@ -47,8 +46,7 @@ def _():
         base_corpus,
         build_rag_prompt,
         build_studio_pipeline_mermaid,
-        chunk_fixed_character,
-        chunk_markdown_sections,
+        chunk_document,
         embedder,
         llm_client,
         mo,
@@ -133,8 +131,7 @@ def _(
     base_corpus,
     build_rag_prompt,
     build_studio_pipeline_mermaid,
-    chunk_fixed_character,
-    chunk_markdown_sections,
+    chunk_document,
     chunk_strategy_ctl,
     custom_doc_editor,
     embedder,
@@ -153,20 +150,13 @@ def _(
     use_reranker_ctl,
 ):
     # 1. Chunk the user's custom document and combine with the core sample docs
-    if chunk_strategy_ctl.value == "fixed":
-        _custom_chunks = chunk_fixed_character(
-            custom_doc_editor.value,
-            chunk_size=450,
-            chunk_overlap=60,
-            doc_source="custom_runbook.md",
-        )
-    else:
-        _custom_chunks = chunk_markdown_sections(
-            custom_doc_editor.value,
-            max_chunk_size=480,
-            chunk_overlap=60,
-            doc_source="custom_runbook.md",
-        )
+    _custom_chunks = chunk_document(
+        custom_doc_editor.value,
+        strategy=chunk_strategy_ctl.value,
+        chunk_size=450 if chunk_strategy_ctl.value == "fixed" else 480,
+        chunk_overlap=60,
+        doc_source="custom_runbook.md",
+    )
 
     _custom_timeline_svg = render_chunk_timeline_svg(
         raw_text=custom_doc_editor.value,
@@ -176,16 +166,13 @@ def _(
     )
 
     _combined = list(base_corpus)
-    _next_id = len(_combined) + 1
     for _c in _custom_chunks:
-        _c.chunk_id = _next_id
-        _next_id += 1
+        _c.chunk_id = len(_combined) + 1
         _combined.append(_c)
 
     # 2. Baseline Pipeline A: Scratch In-Memory Vector RAG (Notebook 1 style)
     _scratch_db = SimpleVectorDB()
-    for _c in _combined:
-        _scratch_db.add_chunk(_c.text, embedder.embed(_c.text))
+    _scratch_db.index_chunks([_c.text for _c in _combined], embedder.embed)
     _q_vec = embedder.embed(studio_query_input.value)
     _baseline_hits = _scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value)
     _base_sys, _base_usr = build_rag_prompt(studio_query_input.value, _baseline_hits)

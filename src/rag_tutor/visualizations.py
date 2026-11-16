@@ -15,7 +15,7 @@ import re
 from typing import Sequence
 
 from .agentic_rag import AgenticTrace
-from .chunker import Chunk
+from .chunker import Chunk, extract_markdown_headings
 from .hybrid_search import HybridSearchResult
 from .llm_backend import SEMANTIC_CLUSTERS, split_sentences, tokenize
 from .reranker import RerankedCandidate
@@ -182,14 +182,11 @@ def render_2d_compass_svg(
 
 
 def render_embedding_barcode_svg(
-    query_text: str,
     query_vec: Sequence[float],
-    doc_text: str,
     doc_vec: Sequence[float],
     cosine_score: float,
 ) -> str:
-    """Render a 3-row 128-dimensional embedding barcode comparing the Query vector,
-    a selected Document Chunk vector, and their element-wise product (Q_i * D_i)."""
+    """Render a 3-row 128-D embedding barcode comparing Query, Chunk, and Q_i * D_i."""
     dim = min(len(query_vec), len(doc_vec))
     if dim == 0:
         return ""
@@ -199,29 +196,12 @@ def render_embedding_barcode_svg(
     x_offset = 125
 
     def val_to_color(val: float, is_product: bool = False) -> str:
+        t = min(1.0, abs(val) * (18.0 if is_product else 4.2))
         if is_product:
-            # Element-wise contribution Q_i * D_i: bright emerald for positive, rose for negative
-            intensity = min(1.0, abs(val) * 18.0)
-            if val >= 0:
-                r = int(15 + (45 - 15) * intensity)
-                g = int(23 + (212 - 23) * intensity)
-                b = int(42 + (191 - 42) * intensity)
-            else:
-                r = int(15 + (244 - 15) * intensity)
-                g = int(23 + (63 - 23) * intensity)
-                b = int(42 + (94 - 42) * intensity)
-            return f"rgb({r},{g},{b})"
+            tr, tg, tb = (45, 212, 191) if val >= 0 else (244, 63, 94)
         else:
-            intensity = min(1.0, abs(val) * 4.2)
-            if val >= 0:
-                r = int(15 + (56 - 15) * intensity)
-                g = int(23 + (189 - 23) * intensity)
-                b = int(42 + (248 - 42) * intensity)
-            else:
-                r = int(15 + (251 - 15) * intensity)
-                g = int(23 + (146 - 23) * intensity)
-                b = int(42 + (60 - 42) * intensity)
-            return f"rgb({r},{g},{b})"
+            tr, tg, tb = (56, 189, 248) if val >= 0 else (251, 146, 60)
+        return f"rgb({int(15 + (tr - 15) * t)},{int(23 + (tg - 23) * t)},{int(42 + (tb - 42) * t)})"
 
     q_rects: list[str] = []
     d_rects: list[str] = []
@@ -517,14 +497,7 @@ def render_chunk_timeline_svg(
     pad_l, pad_r = 75, 25
     track_w = width - pad_l - pad_r
 
-    # Find Markdown heading character positions in raw_text
-    heading_markers: list[tuple[int, str]] = []
-    cursor = 0
-    for line in raw_text.splitlines(keepends=True):
-        m = re.match(r"^(#{1,3})\s+(.+)$", line.strip())
-        if m:
-            heading_markers.append((cursor, m.group(2).strip()))
-        cursor += len(line)
+    heading_markers = extract_markdown_headings(raw_text)
 
     palette = ["#38bdf8", "#60a5fa", "#2dd4bf", "#c084fc", "#f472b6"]
     lane_y = [48, 72, 96]
@@ -670,8 +643,7 @@ def render_hybrid_rrf_svg(
     for idx, r in enumerate(hybrid_results):
         y = 36 + idx * row_h
         vec_contrib = alpha / (rrf_k + r.vector_rank)
-        effective_b_rank = r.bm25_rank if r.bm25_score > 0.0 else 65
-        bm25_contrib = (1.0 - alpha) / (rrf_k + effective_b_rank)
+        bm25_contrib = max(0.0, r.rrf_score - vec_contrib)
 
         vec_w = (vec_contrib / max_rrf) * bar_max_w
         bm25_w = (bm25_contrib / max_rrf) * bar_max_w
@@ -753,18 +725,13 @@ def render_hybrid_rrf_svg(
 
 
 def render_rerank_slopegraph_svg(
-    stage1_pool: list[HybridSearchResult],
-    reranker: CrossEncoderReranker,
-    query: str,
+    all_reranked: list[RerankedCandidate],
     top_k: int,
 ) -> str:
-    """Render a two-column Rank Slopegraph (Bump Chart) showing how every candidate in
-    the Stage-1 pool moves up (promoted) or down (demoted distractor) in Stage-2."""
-    if not stage1_pool:
+    """Render a two-column Rank Slopegraph showing Stage-1 -> Stage-2 rank shifts."""
+    if not all_reranked:
         return ""
 
-    # Score all candidates in stage1_pool so we can plot the full permutation
-    all_reranked = reranker.rerank(query, stage1_pool, top_k=len(stage1_pool))
     n = len(all_reranked)
     row_h = 34
     height = max(210, 56 + n * row_h)

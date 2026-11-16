@@ -17,8 +17,7 @@ def _():
         sys.path.insert(0, str(_src_dir))
 
     from rag_tutor.chunker import (
-        chunk_fixed_character,
-        chunk_markdown_sections,
+        chunk_document,
         load_sample_markdown_corpus,
     )
     from rag_tutor.duckdb_store import DuckDBVectorStore
@@ -31,8 +30,7 @@ def _():
     return (
         DuckDBVectorStore,
         Path,
-        chunk_fixed_character,
-        chunk_markdown_sections,
+        chunk_document,
         doc_files,
         embedder,
         html,
@@ -82,8 +80,7 @@ def _(doc_files, mo):
 
 @app.cell
 def _(
-    chunk_fixed_character,
-    chunk_markdown_sections,
+    chunk_document,
     chunk_overlap_slider,
     chunk_size_slider,
     doc_files,
@@ -94,22 +91,18 @@ def _(
     strategy_selector,
 ):
     _raw_text = doc_files[doc_selector.value]
-    if strategy_selector.value == "fixed":
-        preview_chunks = chunk_fixed_character(
-            _raw_text,
-            chunk_size=chunk_size_slider.value,
-            chunk_overlap=chunk_overlap_slider.value,
-            doc_source=doc_selector.value,
-        )
-        _strat_label = "Fixed-Character Sliding Window"
-    else:
-        preview_chunks = chunk_markdown_sections(
-            _raw_text,
-            max_chunk_size=chunk_size_slider.value,
-            chunk_overlap=chunk_overlap_slider.value,
-            doc_source=doc_selector.value,
-        )
-        _strat_label = "Markdown Section-Aware"
+    preview_chunks = chunk_document(
+        _raw_text,
+        strategy=strategy_selector.value,
+        chunk_size=chunk_size_slider.value,
+        chunk_overlap=chunk_overlap_slider.value,
+        doc_source=doc_selector.value,
+    )
+    _strat_label = (
+        "Fixed-Character Sliding Window"
+        if strategy_selector.value == "fixed"
+        else "Markdown Section-Aware"
+    )
 
     _timeline_svg = render_chunk_timeline_svg(
         raw_text=_raw_text,
@@ -360,18 +353,9 @@ def _(
         {sql_recipe_picker}
         {sql_playground_input}
         **Status**: {_sql_status}
+        {mo.ui.table(_sql_rows, selection=None)}
         """
     )
-    return
-
-
-@app.cell
-def _(duck_store, mo, sql_playground_input):
-    try:
-        _table_data = duck_store.run_custom_sql(sql_playground_input.value)
-    except Exception as _e:
-        _table_data = [{"sql_error": str(_e)}]
-    mo.ui.table(_table_data, selection=None)
     return
 
 

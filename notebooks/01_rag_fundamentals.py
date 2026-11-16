@@ -354,9 +354,7 @@ def _(
     _sel_chunk, _sel_score = _retrieved[_sel_idx]
     _sel_vec = embedder.embed(_sel_chunk)
     _barcode_html = render_embedding_barcode_svg(
-        query_text=user_query_input.value,
         query_vec=_q_vec,
-        doc_text=_sel_chunk,
         doc_vec=_sel_vec,
         cosine_score=_sel_score,
     )

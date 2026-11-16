@@ -260,9 +260,7 @@ def _(
     _reranked = _all_reranked[: rerank_top_k.value]
 
     _slopegraph_html = render_rerank_slopegraph_svg(
-        stage1_pool=_stage1_pool,
-        reranker=reranker,
-        query=rerank_query_input.value,
+        all_reranked=_all_reranked,
         top_k=rerank_top_k.value,
     )
 
