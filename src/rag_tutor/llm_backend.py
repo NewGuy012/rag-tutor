@@ -1,15 +1,4 @@
-"""Local LLM & Embedding Backend for Llama.app (ggml-org/Llama-macOS).
-
-Connects to the native macOS Llama.app server at `http://localhost:9931/v1`
-(OpenAI-compatible API). Also provides:
-1. Live model discovery via `GET /v1/models` (reporting load status & capabilities).
-2. Chat completions via `POST /v1/chat/completions` with support for fast non-thinking
-   mode (`reasoning_effort="none"`, `chat_template_kwargs={"enable_thinking": False}`)
-   and structured JSON schema outputs.
-3. A fast, deterministic 128-dimensional local Python embedding engine (plus optional
-   `/v1/embeddings` support) and a transparent offline fallback generator so all
-   Marimo notebooks work immediately even when Llama.app is closed or loading models.
-"""
+"""Local LLM & Embedding Backend for Llama.app (ggml-org/Llama-macOS)."""
 
 from __future__ import annotations
 
@@ -18,17 +7,21 @@ import json
 import math
 import re
 import time
-import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-
 DEFAULT_LLAMA_MACOS_URL = "http://localhost:9931"
 
-# Curated semantic concept clusters so our built-in local embedding engine captures
-# genuine semantic similarity (e.g., "efficiency / MPGe / kWh" or "regenerative / braking / kinetic")
-# in addition to character n-gram and lexical token features.
+STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "in", "on", "at",
+    "to", "for", "of", "and", "or", "by", "with", "from", "that",
+    "this", "it", "as", "be", "can", "how", "what", "why", "which",
+    "who", "when", "where", "do", "does", "did", "many", "much",
+    "should", "i", "my", "our", "use", "used",
+})
+
 SEMANTIC_CLUSTERS: list[tuple[str, set[str]]] = [
     (
         "ev_efficiency_mpge",
@@ -153,34 +146,47 @@ SEMANTIC_CLUSTERS: list[tuple[str, set[str]]] = [
 ]
 
 
-def _tokenize(text: str) -> list[str]:
-    """Tokenize text into lowercase alphanumeric/code tokens with light stemming."""
-    raw_tokens = re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*%?", text.lower())
-    stemmed: list[str] = []
+def tokenize(
+    text: str,
+    *,
+    stem: bool = True,
+    drop_stopwords: bool = False,
+) -> list[str]:
+    """Tokenize text into lowercase alphanumeric/hyphenated tokens."""
+    pattern = r"[a-z0-9]+(?:-[a-z0-9]+)*%?" if stem else r"[a-z0-9]+(?:-[a-z0-9]+)*"
+    raw_tokens = re.findall(pattern, text.lower())
+    if not stem:
+        if drop_stopwords:
+            return [t for t in raw_tokens if t not in STOPWORDS and len(t) > 1]
+        return raw_tokens
+
+    tokens: list[str] = []
     for tok in raw_tokens:
-        stemmed.append(tok)
+        if drop_stopwords and tok in STOPWORDS:
+            continue
+        tokens.append(tok)
         if len(tok) > 4 and tok.endswith("ing"):
-            stemmed.append(tok[:-3])
+            tokens.append(tok[:-3])
         elif len(tok) > 4 and tok.endswith("ed"):
-            stemmed.append(tok[:-2])
+            tokens.append(tok[:-2])
         elif len(tok) > 3 and tok.endswith("es"):
-            stemmed.append(tok[:-2])
+            tokens.append(tok[:-2])
         elif len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
-            stemmed.append(tok[:-1])
-    return stemmed
+            tokens.append(tok[:-1])
+    return tokens
+
+
+def split_sentences(text: str, min_len: int = 12) -> list[str]:
+    """Split text into sentences/lines with length at least `min_len`."""
+    return [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+|\n+", text)
+        if len(s.strip()) >= min_len
+    ]
 
 
 class LocalEmbeddingEngine:
-    """Deterministic, zero-dependency 128-D embedding engine for educational RAG.
-
-    Combines:
-    - Dimensions 0..14: Semantic concept cluster activations (so synonyms like
-      'sleep' and 'nap' or 'fast' and 'speed' activate the same dimensions).
-    - Dimensions 15..95: Hashed word &stemmed-token projections with sublinear TF.
-    - Dimensions 96..127: Character 3-gram projections for robustness to typos
-      and rare technical codes (like `ERR-VEC-768`).
-    All vectors are L2-normalized to unit length (`||v|| = 1.0`).
-    """
+    """Deterministic 128-D local embedding engine (concept clusters + token hashes + 3-grams)."""
 
     def __init__(self, dim: int = 128) -> None:
         if dim < 32:
@@ -194,10 +200,8 @@ class LocalEmbeddingEngine:
             return [0.0] * self.dim
 
         vec = [0.0] * self.dim
-        tokens = _tokenize(cleaned)
-        token_set = set(tokens)
+        tokens = tokenize(cleaned)
 
-        # 1. Semantic concept dims (0 .. len(SEMANTIC_CLUSTERS)-1)
         num_clusters = min(len(SEMANTIC_CLUSTERS), self.dim // 3)
         for idx in range(num_clusters):
             _, cluster_words = SEMANTIC_CLUSTERS[idx]
@@ -205,29 +209,20 @@ class LocalEmbeddingEngine:
             if matches > 0:
                 vec[idx] = 1.8 * (1.0 + math.log1p(matches))
 
-        # 2. Hashed lexical token dimensions
         lex_start = num_clusters
         lex_span = max(16, int(self.dim * 0.6) - lex_start)
-        stopwords = {
-            "the", "a", "an", "is", "are", "was", "were", "in", "on", "at",
-            "to", "for", "of", "and", "or", "by", "with", "from", "that",
-            "this", "it", "as", "be", "can", "how", "what", "why", "which",
-            "who", "when", "where", "do", "does", "did", "many", "much",
-        }
         for tok in tokens:
-            if tok in stopwords:
+            if tok in STOPWORDS:
                 continue
             digest = hashlib.md5(tok.encode("utf-8")).digest()
             slot1 = lex_start + (int.from_bytes(digest[0:2], "little") % lex_span)
             sign1 = 1.0 if (digest[2] & 1) == 0 else -1.0
             slot2 = lex_start + (int.from_bytes(digest[4:6], "little") % lex_span)
             sign2 = 1.0 if (digest[6] & 1) == 0 else -1.0
-            # Boost rare/specific technical tokens (containing digits or hyphens)
             weight = 1.6 if ("-" in tok or any(c.isdigit() for c in tok)) else 1.0
             vec[slot1] += sign1 * weight
             vec[slot2] += sign2 * (0.5 * weight)
 
-        # 3. Character 3-gram dimensions for subword & identifier similarity
         ngram_start = lex_start + lex_span
         ngram_span = max(8, self.dim - ngram_start)
         compact = re.sub(r"\s+", " ", cleaned.lower())
@@ -236,18 +231,12 @@ class LocalEmbeddingEngine:
             h = int.from_bytes(
                 hashlib.md5(trigram.encode("utf-8")).digest()[:2], "little"
             )
-            slot = ngram_start + (h % ngram_span)
-            vec[slot] += 0.25
+            vec[ngram_start + (h % ngram_span)] += 0.25
 
-        # L2 normalize
         norm = math.sqrt(sum(x * x for x in vec))
         if norm > 0.0:
             vec = [round(x / norm, 6) for x in vec]
         return vec
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of strings."""
-        return [self.embed(t) for t in texts]
 
 
 @dataclass
@@ -266,43 +255,43 @@ class LLMGenerationResult:
 
     content: str
     model: str
-    backend: str  # "llama-macos" or "educational-fallback"
+    backend: str
     latency_ms: float
     thinking_enabled: bool = False
 
 
 class LlamaMacOSClient:
-    """Client for the ggml-org/Llama-macOS native app (`http://localhost:9931`)."""
+    """Client for the ggml-org/Llama-macOS local server (`http://localhost:9931`)."""
 
     def __init__(
         self,
         base_url: str = DEFAULT_LLAMA_MACOS_URL,
         timeout_seconds: float = 45.0,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        cleaned_url = base_url.rstrip("/")
+        parsed = urllib.parse.urlparse(cleaned_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(f"Invalid HTTP(S) base_url: {base_url!r}")
+        self.base_url = cleaned_url
         self.timeout_seconds = timeout_seconds
 
     def check_health(self) -> tuple[bool, list[LlamaModelInfo], str]:
         """Query `GET /v1/models` to check if Llama.app is running and list models."""
-        url = f"{self.base_url}/v1/models"
-        req = urllib.request.Request(url, method="GET")
+        req = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
         try:
             with urllib.request.urlopen(req, timeout=2.5) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-                models_data = payload.get("data", [])
                 models: list[LlamaModelInfo] = []
-                for item in models_data:
+                for item in payload.get("data", []):
                     model_id = str(item.get("id", ""))
                     status_obj = item.get("status") or {}
-                    status_val = str(status_obj.get("value", "ready"))
                     args = status_obj.get("args") or []
-                    supports_vision = "--mmproj" in args if isinstance(args, list) else False
                     if model_id:
                         models.append(
                             LlamaModelInfo(
                                 id=model_id,
-                                status=status_val,
-                                supports_vision=supports_vision,
+                                status=str(status_obj.get("value", "ready")),
+                                supports_vision=isinstance(args, list) and "--mmproj" in args,
                                 raw=item,
                             )
                         )
@@ -328,68 +317,56 @@ class LlamaMacOSClient:
         enable_thinking: bool = False,
         temperature: float = 0.2,
         max_tokens: int = 512,
-        json_schema: dict[str, Any] | None = None,
         retrieved_context: list[str] | None = None,
     ) -> LLMGenerationResult:
-        """Send a chat completion request to Llama.app (`/v1/chat/completions`).
-
-        Automatically falls back to a transparent context-grounded synthesizer if
-        Llama.app is not running or has no models loaded.
-        """
+        """Send a chat completion request to Llama.app with offline fallback."""
         t0 = time.perf_counter()
-        online, models, _ = self.check_health()
-
         selected_model = model
-        if online and models and (not selected_model or selected_model == "auto"):
-            selected_model = models[0].id
 
-        if online and selected_model and selected_model != "educational-fallback":
-            body: dict[str, Any] = {
-                "model": selected_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": False,
-            }
-            if not enable_thinking:
-                # Matches Llama.app RequestBuilder.html specification to disable thinking overhead
-                body["reasoning_effort"] = "none"
-                body["chat_template_kwargs"] = {"enable_thinking": False}
-            if json_schema is not None:
-                body["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": json_schema,
+        if selected_model != "educational-fallback":
+            if not selected_model or selected_model == "auto":
+                online, models, _ = self.check_health()
+                selected_model = models[0].id if (online and models) else None
+
+            if selected_model:
+                body: dict[str, Any] = {
+                    "model": selected_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": False,
                 }
+                if not enable_thinking:
+                    body["reasoning_effort"] = "none"
+                    body["chat_template_kwargs"] = {"enable_thinking": False}
 
-            req = urllib.request.Request(
-                f"{self.base_url}/v1/chat/completions",
-                data=json.dumps(body).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                    resp_json = json.loads(resp.read().decode("utf-8"))
-                    choices = resp_json.get("choices") or []
-                    if choices:
-                        msg = choices[0].get("message") or {}
-                        content = str(msg.get("content") or "").strip()
-                        elapsed = (time.perf_counter() - t0) * 1000.0
-                        return LLMGenerationResult(
-                            content=content,
-                            model=selected_model,
-                            backend="llama-macos",
-                            latency_ms=round(elapsed, 1),
-                            thinking_enabled=enable_thinking,
-                        )
-            except Exception:
-                # Fall through to educational fallback if request fails
-                pass
+                req = urllib.request.Request(
+                    f"{self.base_url}/v1/chat/completions",
+                    data=json.dumps(body).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                        resp_json = json.loads(resp.read().decode("utf-8"))
+                        choices = resp_json.get("choices") or []
+                        if choices:
+                            msg = choices[0].get("message") or {}
+                            content = str(msg.get("content") or "").strip()
+                            elapsed = (time.perf_counter() - t0) * 1000.0
+                            return LLMGenerationResult(
+                                content=content,
+                                model=selected_model,
+                                backend="llama-macos",
+                                latency_ms=round(elapsed, 1),
+                                thinking_enabled=enable_thinking,
+                            )
+                except Exception:
+                    pass
 
-        # Built-in educational fallback synthesizer
         fallback_text = self._synthesize_educational_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -410,21 +387,19 @@ class LlamaMacOSClient:
         user_prompt: str,
         retrieved_context: list[str] | None = None,
     ) -> str:
-        """Synthesize a realistic grounded response from retrieved context when offline."""
+        """Synthesize a grounded response from retrieved context when offline."""
         chunks: list[str] = []
         if retrieved_context:
             chunks = [c.strip() for c in retrieved_context if c.strip()]
         else:
-            # Extract bulleted facts from system_prompt if present
             for line in system_prompt.splitlines():
                 stripped = line.strip()
-                if stripped.startswith("- ") or stripped.startswith("* ") or stripped.startswith("["):
+                if stripped.startswith(("- ", "* ", "[")):
                     cleaned = re.sub(r"^[-*]\s*(\[[^\]]+\]\s*)?", "", stripped)
                     if cleaned:
                         chunks.append(cleaned)
 
         if not chunks:
-            # Ungrounded (No-RAG) mode demonstration
             return (
                 "I do not have verified external context in my prompt for this question. "
                 "Without Retrieval-Augmented Generation (RAG), a language model must guess "
@@ -432,17 +407,13 @@ class LlamaMacOSClient:
                 "`PROTO-RAG-101` or `ERR-VEC-768`) or specific numerical facts."
             )
 
-        # Score sentences in the provided chunks by overlap with the user question
-        q_tokens = set(_tokenize(user_prompt))
+        q_tokens = set(tokenize(user_prompt))
         scored_sentences: list[tuple[float, int, str]] = []
         for c_idx, chunk in enumerate(chunks):
-            sentences = re.split(r"(?<=[.!?])\s+|\n+", chunk)
-            for sent in sentences:
-                s_clean = sent.strip()
-                if len(s_clean) < 12 or s_clean.startswith("#"):
+            for s_clean in split_sentences(chunk, min_len=12):
+                if s_clean.startswith("#"):
                     continue
-                s_tokens = set(_tokenize(s_clean))
-                overlap = len(q_tokens & s_tokens)
+                overlap = len(q_tokens & set(tokenize(s_clean)))
                 score = overlap + (0.25 if c_idx == 0 else 0.0)
                 scored_sentences.append((score, c_idx + 1, s_clean))
 
@@ -464,10 +435,8 @@ _DEFAULT_EMBEDDER = LocalEmbeddingEngine(dim=128)
 
 
 def get_default_client() -> LlamaMacOSClient:
-    """Return a shared LlamaMacOSClient instance."""
     return _DEFAULT_CLIENT
 
 
 def get_default_embedder() -> LocalEmbeddingEngine:
-    """Return a shared 128-D LocalEmbeddingEngine instance."""
     return _DEFAULT_EMBEDDER

@@ -17,8 +17,8 @@ from typing import Sequence
 from .agentic_rag import AgenticTrace
 from .chunker import Chunk
 from .hybrid_search import HybridSearchResult
-from .llm_backend import SEMANTIC_CLUSTERS, _tokenize
-from .reranker import CrossEncoderReranker, RerankedCandidate
+from .llm_backend import SEMANTIC_CLUSTERS, split_sentences, tokenize
+from .reranker import RerankedCandidate
 from .scratch_rag import cosine_similarity
 
 
@@ -319,7 +319,7 @@ TOPIC_PALETTE: list[tuple[str, str, set[str]]] = [
 
 
 def _classify_ev_topic(text: str) -> tuple[str, str]:
-    tokens = set(_tokenize(text))
+    tokens = set(tokenize(text))
     best_label = "History, Safety & BMS"
     best_color = "#fb7185"
     best_hits = -1
@@ -858,12 +858,9 @@ def render_cross_attention_heatmap_svg(
 ) -> str:
     """Render a 2D Cross-Attention Token × Sentence interaction heatmap showing why
     a Cross-Encoder promotes passages with tight token clustering."""
-    reranker = CrossEncoderReranker()
-    q_tokens = list(dict.fromkeys(reranker._tokenize_content(query)))[:10]
+    q_tokens = list(dict.fromkeys(tokenize(query, stem=False, drop_stopwords=True)))[:10]
     sentences = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+|\n+", chunk_text)
-        if len(s.strip()) > 8 and not s.strip().startswith("#")
+        s for s in split_sentences(chunk_text, min_len=9) if not s.startswith("#")
     ][:5]
     if not sentences:
         sentences = [chunk_text[:120]]
@@ -885,8 +882,7 @@ def render_cross_attention_heatmap_svg(
     cells_svg: list[str] = []
     for r_idx, sent in enumerate(sentences):
         y = pad_t + r_idx * row_h
-        s_tokens = reranker._tokenize_content(sent)
-        s_set = set(s_tokens)
+        s_set = set(tokenize(sent, stem=False, drop_stopwords=True))
         short_sent = sent[:24] + ("..." if len(sent) > 24 else "")
         cells_svg.append(
             f'<text x="10" y="{y + 17}" fill="#cbd5e1" font-size="10" font-family="monospace">'
