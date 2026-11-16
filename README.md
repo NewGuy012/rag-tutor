@@ -60,10 +60,10 @@ flowchart LR
 
 | Notebook | Topic | What You'll Build & Explore |
 | :--- | :--- | :--- |
-| **[`notebooks/01_rag_fundamentals.py`](notebooks/01_rag_fundamentals.py)** | **Part 1: The Basic Hows & Whys** | Compare RAG vs. No-RAG hallucinations, drag 2D vectors on an interactive cosine similarity compass, and build a 50-line RAG on `ev-facts.txt`. |
-| **[`notebooks/02_chunking_and_duckdb.py`](notebooks/02_chunking_and_duckdb.py)** | **Part 2: Chunking & DuckDB Vectors** | Experiment with fixed-window vs. Markdown section chunking, index vectors into **DuckDB** (`FLOAT[128]`), and run live `array_cosine_similarity` SQL queries. |
-| **[`notebooks/03_advanced_rag.py`](notebooks/03_advanced_rag.py)** | **Part 3: Production Improvements** | Tune **Hybrid Search** ($\text{BM25} + \text{Vector} + \text{RRF}$), inspect **Cross-Encoder Reranking** rank shifts, and trace a 3-step **Agentic RAG** workflow. |
-| **[`notebooks/04_final_project_studio.py`](notebooks/04_final_project_studio.py)** | **Part 4: Capstone RAG Studio** | Bring your own Markdown documents, toggle production upgrades on/off, and compare Basic RAG vs. Production RAG side-by-side. |
+| **[`notebooks/01_rag_fundamentals.py`](notebooks/01_rag_fundamentals.py)** | **Part 1: The Basic Hows & Whys** | Compare RAG vs. No-RAG hallucinations, drag 2D vectors on an **Interactive Vector Compass** (with projection arcs & Cosine vs. Dot vs. Euclidean gauges), explore a **2D PCA Embedding Space Map** with live query rays, and inspect a **128-D Embedding Barcode Heatmap**. |
+| **[`notebooks/02_chunking_and_duckdb.py`](notebooks/02_chunking_and_duckdb.py)** | **Part 2: Chunking & DuckDB Vectors** | Visualize section boundaries & sliding overlap on a **Document Chunking Timeline Minimap & Size Histogram**, index `FLOAT[128]` vectors into **DuckDB**, and run curated recipes in the **Interactive SQL Playground**. |
+| **[`notebooks/03_advanced_rag.py`](notebooks/03_advanced_rag.py)** | **Part 3: Production Improvements** | Tune **Hybrid Search** with a live **Stacked RRF Decomposition & Decay Curve**, trace **Stage-1 → Stage-2 Cross-Encoder Rank Slopegraphs** & **Token × Sentence Attention Matrices**, and watch a **Dynamic Mermaid Agentic Execution Graph** & **Claim Faithfulness Meter**. |
+| **[`notebooks/04_final_project_studio.py`](notebooks/04_final_project_studio.py)** | **Part 4: Capstone RAG Studio** | Bring your own Markdown documents, inspect custom chunk minimaps, watch the **Live Pipeline B Mermaid Architecture Diagram** rewire as you flip switches, and compare Basic vs. Production RAG in the **Visual A/B Arena**. |
 
 📖 **Companion Textbook**: Read the standalone [**RAG Reference Guide (`docs/RAG_REFERENCE_GUIDE.md`)**](docs/RAG_REFERENCE_GUIDE.md) for mathematical intuition, SQL cheat sheets, architecture diagrams, and production design patterns.
 
@@ -128,7 +128,8 @@ rag-tutor/
 │       ├── duckdb_store.py        # DuckDB FLOAT[128] vector + Okapi BM25 store
 │       ├── hybrid_search.py       # Reciprocal Rank Fusion (RRF-K60) engine
 │       ├── reranker.py            # Stage-2 Cross-Encoder reranker
-│       └── agentic_rag.py         # Query planner, iterative retriever & verifier
+│       ├── agentic_rag.py         # Query planner, iterative retriever & verifier
+│       └── visualizations.py      # Interactive SVG, PCA map, heatmap & Mermaid builders
 └── notebooks/
     ├── 01_rag_fundamentals.py
     ├── 02_chunking_and_duckdb.py

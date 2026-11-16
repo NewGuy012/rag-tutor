@@ -24,6 +24,19 @@ from .duckdb_store import DuckDBVectorStore
 from .hybrid_search import HybridSearchEngine, HybridSearchResult
 from .reranker import CrossEncoderReranker, RerankedCandidate
 from .agentic_rag import AgenticRAGPipeline, AgenticTrace
+from .visualizations import (
+    build_agentic_mermaid_diagram,
+    build_studio_pipeline_mermaid,
+    render_2d_compass_svg,
+    render_ab_arena_comparison_svg,
+    render_chunk_timeline_svg,
+    render_cross_attention_heatmap_svg,
+    render_embedding_barcode_svg,
+    render_embedding_space_2d_svg,
+    render_faithfulness_audit_svg,
+    render_hybrid_rrf_svg,
+    render_rerank_slopegraph_svg,
+)
 
 __all__ = [
     "dot_product",
@@ -47,4 +60,15 @@ __all__ = [
     "RerankedCandidate",
     "AgenticRAGPipeline",
     "AgenticTrace",
+    "build_agentic_mermaid_diagram",
+    "build_studio_pipeline_mermaid",
+    "render_2d_compass_svg",
+    "render_ab_arena_comparison_svg",
+    "render_chunk_timeline_svg",
+    "render_cross_attention_heatmap_svg",
+    "render_embedding_barcode_svg",
+    "render_embedding_space_2d_svg",
+    "render_faithfulness_audit_svg",
+    "render_hybrid_rrf_svg",
+    "render_rerank_slopegraph_svg",
 ]

@@ -21,6 +21,13 @@ def _():
     from rag_tutor.hybrid_search import HybridSearchEngine
     from rag_tutor.llm_backend import get_default_client, get_default_embedder
     from rag_tutor.reranker import CrossEncoderReranker
+    from rag_tutor.visualizations import (
+        build_agentic_mermaid_diagram,
+        render_cross_attention_heatmap_svg,
+        render_faithfulness_audit_svg,
+        render_hybrid_rrf_svg,
+        render_rerank_slopegraph_svg,
+    )
 
     embedder = get_default_embedder()
     llm_client = get_default_client()
@@ -46,11 +53,16 @@ def _():
         DuckDBVectorStore,
         HybridSearchEngine,
         agentic_pipeline,
+        build_agentic_mermaid_diagram,
         corpus_chunks,
         embedder,
         hybrid_engine,
         llm_client,
         mo,
+        render_cross_attention_heatmap_svg,
+        render_faithfulness_audit_svg,
+        render_hybrid_rrf_svg,
+        render_rerank_slopegraph_svg,
         reranker,
         store,
     )
@@ -81,7 +93,7 @@ def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
     mo.md(
         f"""
         # 🚀 RAG Tutor — Notebook 3: Common Improvements for Production
-        ### *Hybrid Search (BM25 + Vector), Cross-Encoder Reranking & Agentic RAG*
+        ### *Visualizing Hybrid Search (RRF), Cross-Encoder Slopegraphs & Agentic RAG*
 
         A basic 50-line vector RAG works great for simple demos, but in production systems it runs into three classic failure modes:
         1. **Exact Keyword Blindness**: Dense vectors compress a whole passage into one vector and often miss exact error codes, part numbers, or function names (solved by **Hybrid Search**).
@@ -131,6 +143,7 @@ def _(
     hybrid_preset,
     hybrid_rrf_k,
     mo,
+    render_hybrid_rrf_svg,
 ):
     hybrid_results = hybrid_engine.search(
         query=hybrid_preset.value,
@@ -138,9 +151,46 @@ def _(
         alpha=hybrid_alpha_slider.value,
         rrf_k=hybrid_rrf_k.value,
     )
+    _rrf_svg = render_hybrid_rrf_svg(
+        hybrid_results=hybrid_results,
+        alpha=hybrid_alpha_slider.value,
+        rrf_k=hybrid_rrf_k.value,
+    )
+
     _rows = "\n".join(
-        f"| **#{r.final_rank}** | `{r.rrf_score:.5f}` | #{r.vector_rank} (`{r.vector_score:.3f}`) | #{r.bm25_rank} (`{r.bm25_score:.2f}`) | `{r.doc_source}` > **{r.section_title}** | {r.text[:120].replace(chr(10), ' ')}... |"
+        f"| **#{r.final_rank}** | `{r.rrf_score:.5f}` | #{r.vector_rank} (`{r.vector_score:.3f}`) | #{r.bm25_rank} (`{r.bm25_score:.2f}`) | `{r.doc_source}` > **{r.section_title}** | {r.text[:110].replace(chr(10), ' ')}... |"
         for r in hybrid_results
+    )
+
+    _top = hybrid_results[0]
+    _mode_lbl = (
+        "Pure BM25 Lexical"
+        if hybrid_alpha_slider.value == 0.0
+        else ("Pure Vector Semantic" if hybrid_alpha_slider.value == 1.0 else f"Balanced Hybrid (α={hybrid_alpha_slider.value:.1f})")
+    )
+    _stats = mo.hstack(
+        [
+            mo.stat(
+                value=f"Chunk #{_top.chunk_id}",
+                label="Hybrid Rank #1 Winner",
+                caption=f"{_top.doc_source} > {_top.section_title}",
+                bordered=True,
+            ),
+            mo.stat(
+                value=f"Vec #{_top.vector_rank} / BM25 #{_top.bm25_rank}",
+                label="Winner's Retriever Ranks",
+                caption=f"Fused RRF = {_top.rrf_score:.5f}",
+                bordered=True,
+            ),
+            mo.stat(
+                value=_mode_lbl,
+                label="Active Fusion Mode",
+                caption=f"Smoothing constant k = {hybrid_rrf_k.value}",
+                bordered=True,
+            ),
+        ],
+        widths="equal",
+        gap=2,
     )
 
     mo.md(
@@ -152,8 +202,15 @@ def _(
 
         $$\\text{{RRF\\_Score}}(d) = \\frac{{\\alpha}}{{k + \\text{{rank}}_{{\\text{{vector}}}}(d)}} + \\frac{{1 - \\alpha}}{{k + \\text{{rank}}_{{\\text{{bm25}}}}(d)}}$$
 
+        Drag **Fusion Weight $\\alpha$** and **RRF Constant $k$** below to watch the **Stacked RRF Decomposition Bars**
+        (left) and the **Rank Discount Curve** (right) shift in real time:
+
         {hybrid_preset}
         {mo.hstack([hybrid_alpha_slider, hybrid_rrf_k], justify="start", gap=2)}
+
+        {_stats}
+
+        {mo.Html(_rrf_svg)}
 
         | Hybrid Rank | Fused `RRF_Score` | Vector Rank (Score) | BM25 Rank (Score) | Source Section | Excerpt |
         | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -171,22 +228,56 @@ def _(mo):
         full_width=True,
     )
     rerank_top_k = mo.ui.slider(1, 6, step=1, value=3, label="Final Top K after Reranking:")
-    return rerank_query_input, rerank_top_k
+    rerank_inspect_slot = mo.ui.dropdown(
+        options={
+            "Inspect Stage-2 Rank #1 (Top Promoted Answer)": 0,
+            "Inspect Stage-2 Rank #2": 1,
+            "Inspect Demoted Distractor (Lowest Ranked in Pool)": -1,
+        },
+        value="Inspect Stage-2 Rank #1 (Top Promoted Answer)",
+        label="Cross-Attention Matrix Target:",
+    )
+    return rerank_inspect_slot, rerank_query_input, rerank_top_k
 
 
 @app.cell
 def _(
     hybrid_engine,
     mo,
+    render_cross_attention_heatmap_svg,
+    render_rerank_slopegraph_svg,
+    rerank_inspect_slot,
     rerank_query_input,
     rerank_top_k,
     reranker,
 ):
-    _stage1_pool = hybrid_engine.search(rerank_query_input.value, top_k=8, alpha=0.5)
-    _reranked = reranker.rerank(
+    _stage1_pool = hybrid_engine.search(rerank_query_input.value, top_k=7, alpha=0.5)
+    _all_reranked = reranker.rerank(
         rerank_query_input.value,
         _stage1_pool,
+        top_k=len(_stage1_pool),
+    )
+    _reranked = _all_reranked[: rerank_top_k.value]
+
+    _slopegraph_html = render_rerank_slopegraph_svg(
+        stage1_pool=_stage1_pool,
+        reranker=reranker,
+        query=rerank_query_input.value,
         top_k=rerank_top_k.value,
+    )
+
+    _target_idx = rerank_inspect_slot.value
+    _inspected = _all_reranked[_target_idx] if _all_reranked else None
+    _attn_html = (
+        render_cross_attention_heatmap_svg(
+            query=rerank_query_input.value,
+            chunk_text=_inspected.text,
+            section_title=f"Chunk #{_inspected.chunk_id}: {_inspected.section_title}",
+            rerank_score=_inspected.rerank_score,
+            explanation=_inspected.explanation,
+        )
+        if _inspected is not None
+        else ""
     )
 
     _rerank_rows = []
@@ -208,10 +299,14 @@ def _(
         Bi-encoders embed the query and each chunk **separately**, which is fast for searching thousands of rows
         in DuckDB, but misses fine-grained token-to-token interactions.
         A **Cross-Encoder Reranker** scores each candidate `(query, chunk)` pair together, promoting direct
-        answers and pushing down noisy distractors before we build the LLM prompt.
+        answers above the **Top-$K$ Cutoff Line** and pushing down noisy distractors!
 
         {rerank_query_input}
-        {rerank_top_k}
+        {mo.hstack([rerank_top_k, rerank_inspect_slot], justify="start", gap=3)}
+
+        {mo.Html(_slopegraph_html)}
+
+        {mo.Html(_attn_html)}
 
         | Stage-2 Rank | Rank Shift from Stage-1 | Cross-Encoder Score | Document & Section | Reranker Interaction Signals |
         | :--- | :--- | :--- | :--- | :--- |
@@ -225,7 +320,7 @@ def _(
 def _(mo):
     agentic_query_input = mo.ui.text(
         value="What causes DuckDB error ERR-VEC-768 and how does the two-stage reranking pattern STAGE2-RERANK-15to3 improve precision?",
-        label="Ask a Multi-Hop Question for Agentic RAG:",
+        label="Ask a Multi-Hop Question for Agentic RAG (watch the Mermaid execution graph rewire live):",
         full_width=True,
     )
     return (agentic_query_input,)
@@ -235,8 +330,10 @@ def _(mo):
 def _(
     agentic_pipeline,
     agentic_query_input,
+    build_agentic_mermaid_diagram,
     mo,
     model_dropdown,
+    render_faithfulness_audit_svg,
     thinking_toggle,
 ):
     trace = agentic_pipeline.run(
@@ -245,30 +342,44 @@ def _(
         enable_thinking=thinking_toggle.value,
     )
 
+    _mermaid_diagram = mo.mermaid(build_agentic_mermaid_diagram(trace))
+    _audit_html = render_faithfulness_audit_svg(trace)
+
     _step_rows = "\n".join(
         f"| **Step {s.step_number}** | `{s.sub_query}` | {s.reason} | **Chunk #{s.top_chunk_id}** (`{s.top_doc_source}` > {s.top_section}) | `{s.rerank_score:.3f}` |"
         for s in trace.retrieval_steps
     )
 
-    _verify_rows = "\n".join(
-        f"| {'✅ Grounded' if v.is_grounded else '⚠️ Unverified'} | `{v.confidence:.2f}` | {f'Chunk #{v.supporting_chunk_id}' if v.supporting_chunk_id else 'None'} | {v.claim} |"
-        for v in trace.verifications
-    ) or "| ✅ Grounded | `1.00` | Verified Context | Response synthesized directly from retrieved citations. |"
+    _trace_tree = mo.tree(
+        {
+            "original_query": trace.original_query,
+            "is_multi_hop": trace.is_multi_hop,
+            "planned_sub_queries": trace.planned_sub_queries,
+            "sufficiency_passed": trace.sufficiency_passed,
+            "faithfulness_score": trace.faithfulness_score,
+            "retrieved_chunks": [
+                f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title}) [score={c.rerank_score:.3f}]"
+                for c in trace.final_context_chunks
+            ],
+        },
+        label="AgenticTrace",
+    )
 
     mo.md(
         f"""
-        ## 3. Agentic RAG: Query Decomposition, Iterative Lookup & Verification
+        ## 3. Agentic RAG: Live Execution Graph, Iterative Lookup & Verification
 
         Notice what happens when a user asks a **multi-hop question** that spans multiple documents
-        (e.g., *DuckDB error codes* in `02_duckdb_vectors.md` **AND** *Cross-Encoder patterns* in `03_production_rag_patterns.md`):
+        (e.g., *DuckDB error codes* in `02_duckdb_vectors.md` **AND** *Cross-Encoder patterns* in `03_production_rag_patterns.md`).
+        Try removing `"and how..."` from the query below to see the **Mermaid Execution Graph** collapse from a multi-branch plan into a single-hop lookup!
 
         {agentic_query_input}
 
-        ### Step 1: Query Planner & Decomposer
-        - **Multi-Hop Detected**: `{trace.is_multi_hop}`
-        - **Planned Sub-Queries ({len(trace.planned_sub_queries)})**: {", ".join(f"`{sq}`" for sq in trace.planned_sub_queries)}
+        ### Live Agentic Execution Flowchart (`mo.mermaid`)
+        {_mermaid_diagram}
 
-        ### Step 2: Iterative Retrieval & Sufficiency Check
+        ### Step 1 & 2: Sub-Query Planner & Iterative Retrieval
+        - **Multi-Hop Detected**: `{trace.is_multi_hop}` · **Planned Sub-Queries ({len(trace.planned_sub_queries)})**: {", ".join(f"`{sq}`" for sq in trace.planned_sub_queries)}
         - **Sufficiency Audit**: {'✅ Passed' if trace.sufficiency_passed else '⚠️ Low Confidence'} — _{trace.sufficiency_note}_
 
         | Step | Sub-Query Executed | Planner Reason | Top Reranked Evidence | Cross-Encoder Score |
@@ -278,10 +389,10 @@ def _(
         ### Step 3: Grounded Answer (`{trace.llm_model_used}` · `{trace.latency_ms:.0f} ms`)
         > {trace.final_answer}
 
-        ### Step 4: Self-Reflection & Faithfulness Verification (Score: `{trace.faithfulness_score:.0%}`)
-        | Audit Status | Grounding Score | Supporting Source | Audited Claim |
-        | :--- | :--- | :--- | :--- |
-        {_verify_rows}
+        ### Step 4: Self-Reflection & Faithfulness Verification
+        {mo.Html(_audit_html)}
+
+        {mo.accordion({"🌳 Inspect Raw AgenticTrace Object (`mo.tree`)": _trace_tree})}
         """
     )
     return (trace,)

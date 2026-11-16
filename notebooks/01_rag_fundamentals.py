@@ -25,6 +25,11 @@ def _():
         load_ev_facts,
         vector_norm,
     )
+    from rag_tutor.visualizations import (
+        render_2d_compass_svg,
+        render_embedding_barcode_svg,
+        render_embedding_space_2d_svg,
+    )
 
     llm_client = get_default_client()
     embedder = get_default_embedder()
@@ -40,6 +45,9 @@ def _():
         llm_client,
         math,
         mo,
+        render_2d_compass_svg,
+        render_embedding_barcode_svg,
+        render_embedding_space_2d_svg,
         vector_norm,
     )
 
@@ -69,15 +77,29 @@ def _(llm_client, mo):
 @app.cell
 def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
     _badge = "🟢 **Llama.app Connected**" if is_online else "🟡 **Offline Educational Fallback Active**"
+    _overview_mermaid = mo.mermaid(
+        """
+        flowchart LR
+            Q["1. User Question"] --> Emb["Embed into 128-D Vector"]
+            Emb --> Sim["2. Cosine Similarity vs. ev-facts.txt"]
+            Sim --> TopN["Top-N Matched Facts"]
+            TopN --> Prompt["3. Augment System Prompt"]
+            Prompt --> LLM["Local Llama.app (:9931)"]
+            LLM --> Ans["Grounded Cited Answer"]
+        """
+    )
     mo.md(
         f"""
         # 🦉 RAG Tutor — Notebook 1: The Basic Hows & Whys
-        ### *Building a Retrieval-Augmented Generation System from Scratch*
+        ### *Building & Visualizing a Retrieval-Augmented Generation System from Scratch*
 
         Welcome to **Notebook 1** of the interactive RAG curriculum! Inspired by Xuan-Son Nguyen's
-        [*Code a simple RAG from scratch*](https://huggingface.co/blog/ngxson/make-your-own-rag),
-        this notebook demystifies how RAG works using **pure Python** and an Electric Vehicle knowledge base
-        (`data/ev-facts.txt`)—before we touch any vector databases or advanced production pipelines.
+        [*Code a simple RAG from scratch*](https://huggingface.co/blog/ngxson/make-your-own-rag) and interactive
+        explorers from the [**Marimo Gallery**](https://marimo.io/gallery), this notebook demystifies how RAG works
+        using **pure Python** and an Electric Vehicle knowledge base (`data/ev-facts.txt`)—before we touch any
+        external vector databases or advanced production pipelines.
+
+        {_overview_mermaid}
 
         ---
         **Local LLM Backend (`http://localhost:9931/v1`)**: {_badge} — _{status_msg}_
@@ -140,6 +162,23 @@ def _(
         retrieved_context=[_fact_context],
     )
 
+    _no_rag_card = mo.callout(
+        mo.md(
+            f"**❌ Without RAG (Parametric Memory Only)**\n\n"
+            f"*Context Injected:* `None`\n\n"
+            f"> {_no_rag_res.content}"
+        ),
+        kind="warn",
+    )
+    _with_rag_card = mo.callout(
+        mo.md(
+            f"**✅ With RAG (Grounded Context Injected)**\n\n"
+            f"*Verified Fact:* `{_fact_context}`\n\n"
+            f"> {_with_rag_res.content}"
+        ),
+        kind="success",
+    )
+
     mo.md(
         f"""
         ## 1. Why Do We Need RAG? (The Hallucination & Cutoff Problem)
@@ -154,10 +193,7 @@ def _(
 
         {hallucination_query_picker}
 
-        | Mode | Prompt Context Provided | Model Output (`{_with_rag_res.model}`) |
-        | :--- | :--- | :--- |
-        | ❌ **Without RAG** | *None (relies purely on model weights)* | {_no_rag_res.content} |
-        | ✅ **With RAG** | `{_fact_context}` | {_with_rag_res.content} |
+        {mo.hstack([_no_rag_card, _with_rag_card], widths="equal", gap=2)}
         """
     )
     return
@@ -178,6 +214,7 @@ def _(
     dot_product,
     math,
     mo,
+    render_2d_compass_svg,
     vec_a_x,
     vec_a_y,
     vec_b_x,
@@ -193,30 +230,36 @@ def _(
     _clamped = max(-1.0, min(1.0, _cos))
     _angle_deg = math.degrees(math.acos(_clamped)) if (_norm_a > 0 and _norm_b > 0) else 0.0
 
-    # Render an interactive 2D SVG compass showing Vector A and Vector B
-    _cx, _cy, _scale = 130, 130, 95
-    _ax = _cx + _a[0] * _scale
-    _ay = _cy - _a[1] * _scale
-    _bx = _cx + _b[0] * _scale
-    _by = _cy - _b[1] * _scale
+    _compass_html = render_2d_compass_svg(_a, _b, _dot, _norm_a, _norm_b, _cos, _angle_deg)
 
-    _svg = f"""
-    <svg width="260" height="260" viewBox="0 0 260 260" style="background:#0f172a;border-radius:12px;border:1px solid #334155;">
-      <circle cx="{_cx}" cy="{_cy}" r="{_scale}" fill="none" stroke="#334155" stroke-dasharray="4 4"/>
-      <line x1="15" y1="{_cy}" x2="245" y2="{_cy}" stroke="#475569" stroke-width="1"/>
-      <line x1="{_cx}" y1="15" x2="{_cx}" y2="245" stroke="#475569" stroke-width="1"/>
-      <line x1="{_cx}" y1="{_cy}" x2="{_ax:.1f}" y2="{_ay:.1f}" stroke="#2dd4bf" stroke-width="3.5" stroke-linecap="round"/>
-      <circle cx="{_ax:.1f}" cy="{_ay:.1f}" r="5" fill="#2dd4bf"/>
-      <text x="{_ax + 6:.1f}" y="{_ay - 6:.1f}" fill="#2dd4bf" font-size="12" font-family="monospace">A</text>
-      <line x1="{_cx}" y1="{_cy}" x2="{_bx:.1f}" y2="{_by:.1f}" stroke="#f59e0b" stroke-width="3.5" stroke-linecap="round"/>
-      <circle cx="{_bx:.1f}" cy="{_by:.1f}" r="5" fill="#f59e0b"/>
-      <text x="{_bx + 6:.1f}" y="{_by + 14:.1f}" fill="#f59e0b" font-size="12" font-family="monospace">B</text>
-    </svg>
-    """
+    _stat_cards = mo.hstack(
+        [
+            mo.stat(
+                value=f"{_cos:+.4f}",
+                label="Cosine Similarity",
+                caption=f"Angle θ = {_angle_deg:.1f}°",
+                bordered=True,
+            ),
+            mo.stat(
+                value=f"{_dot:+.4f}",
+                label="Dot Product (A · B)",
+                caption=f"({vec_a_x.value:.2f}×{vec_b_x.value:.2f}) + ({vec_a_y.value:.2f}×{vec_b_y.value:.2f})",
+                bordered=True,
+            ),
+            mo.stat(
+                value=f"{_norm_a:.3f} / {_norm_b:.3f}",
+                label="Magnitudes ‖A‖ / ‖B‖",
+                caption="Euclidean L2 lengths",
+                bordered=True,
+            ),
+        ],
+        widths="equal",
+        gap=2,
+    )
 
     mo.md(
         f"""
-        ## 2. How Retrieval Works: Embeddings & Cosine Similarity
+        ## 2. How Retrieval Works: Interactive 2D Vector Compass & Metric Gauges
 
         To find which facts in our knowledge base match a user's question, we convert text into
         **Embedding Vectors** (lists of floating-point numbers representing meaning) and measure the angle
@@ -224,19 +267,14 @@ def _(
 
         $$\\text{{cosine\\_similarity}}(A, B) = \\frac{{A \\cdot B}}{{\\|A\\| \\cdot \\|B\\|}} = \\frac{{\\sum_{{i=1}}^{{n}} A_i B_i}}{{\\sqrt{{\\sum_{{i=1}}^{{n}} A_i^2}} \\sqrt{{\\sum_{{i=1}}^{{n}} B_i^2}}}}$$
 
-        - **`+1.0`**: Vectors point in the **same direction** (highly related meaning).
-        - **`0.0`**: Vectors are **perpendicular / 90°** (unrelated topics).
-        - **`-1.0`**: Vectors point in **opposite directions**.
+        Drag the sliders below to move 2D vectors **A** (teal) and **B** (amber), inspect the **orthogonal projection**
+        and **angle arc $\\theta$**, and compare **Cosine Similarity** against **Dot Product** and **Euclidean Distance**:
 
-        Drag the sliders below to move 2D vectors **A** (teal) and **B** (amber) and watch the pure-Python math update live:
+        {mo.hstack([vec_a_x, vec_a_y, vec_b_x, vec_b_y], justify="start", gap=2)}
 
-        {mo.hstack([mo.vstack([vec_a_x, vec_a_y, vec_b_x, vec_b_y]), mo.Html(_svg)], justify="start", gap=3)}
+        {_stat_cards}
 
-        | Step | Formula | Live Value |
-        | :--- | :--- | :--- |
-        | **1. Dot Product ($A \\cdot B$)** | `({vec_a_x.value:.2f} * {vec_b_x.value:.2f}) + ({vec_a_y.value:.2f} * {vec_b_y.value:.2f})` | **`{_dot:.4f}`** |
-        | **2. Magnitude $\\|A\\|$ & $\\|B\\|$** | `$\\sqrt{{A_x^2 + A_y^2}}$` and `$\\sqrt{{B_x^2 + B_y^2}}$` | **`{_norm_a:.4f}`** & **`{_norm_b:.4f}`** |
-        | **3. Cosine Similarity** | `dot_product / (norm_a * norm_b)` | **`{_cos:.4f}`** *(Angle $\\theta = {_angle_deg:.1f}^\\circ$)* |
+        {mo.Html(_compass_html)}
         """
     )
     return
@@ -247,33 +285,44 @@ def _(SimpleVectorDB, embedder, ev_facts):
     # Build the 50-line Scratch RAG Vector DB in pure Python!
     scratch_db = SimpleVectorDB()
     scratch_db.index_chunks(ev_facts, embedder.embed)
-    return (scratch_db,)
+    ev_embeddings = [vec for _, vec in scratch_db.entries]
+    return ev_embeddings, scratch_db
 
 
 @app.cell
 def _(mo):
     user_query_input = mo.ui.text(
         value="How does regenerative braking recover kinetic energy and extend brake pad life?",
-        label="Ask a question about electric vehicles:",
+        label="Ask a question about electric vehicles (updates the 2D Embedding Map & Barcode live):",
         full_width=True,
     )
     top_n_slider = mo.ui.slider(
         start=1,
-        stop=8,
+        stop=6,
         step=1,
         value=3,
-        label="Top N Chunks to Retrieve (`top_n`):",
+        label="Top N Chunks (`top_n`):",
     )
-    return top_n_slider, user_query_input
+    inspect_rank_dropdown = mo.ui.dropdown(
+        options={"Rank #1 (Best Match)": 0, "Rank #2": 1, "Rank #3": 2},
+        value="Rank #1 (Best Match)",
+        label="Inspect 128-D Barcode for:",
+    )
+    return inspect_rank_dropdown, top_n_slider, user_query_input
 
 
 @app.cell
 def _(
     build_rag_prompt,
     embedder,
+    ev_embeddings,
+    ev_facts,
+    inspect_rank_dropdown,
     llm_client,
     mo,
     model_dropdown,
+    render_embedding_barcode_svg,
+    render_embedding_space_2d_svg,
     scratch_db,
     thinking_toggle,
     top_n_slider,
@@ -291,9 +340,60 @@ def _(
         retrieved_context=[chunk for chunk, _ in _retrieved],
     )
 
+    # 1. Render 2D Embedding Space Map (PCA projection of all 16 EV facts + live Query Star)
+    _space_map_html = render_embedding_space_2d_svg(
+        chunks=ev_facts,
+        embeddings=ev_embeddings,
+        query_text=user_query_input.value,
+        query_vec=_q_vec,
+        top_n=top_n_slider.value,
+    )
+
+    # 2. Render 128-D Embedding Barcode for the chosen rank
+    _sel_idx = min(inspect_rank_dropdown.value, len(_retrieved) - 1)
+    _sel_chunk, _sel_score = _retrieved[_sel_idx]
+    _sel_vec = embedder.embed(_sel_chunk)
+    _barcode_html = render_embedding_barcode_svg(
+        query_text=user_query_input.value,
+        query_vec=_q_vec,
+        doc_text=_sel_chunk,
+        doc_vec=_sel_vec,
+        cosine_score=_sel_score,
+    )
+
     _rows_md = "\n".join(
         f"| **#{idx + 1}** | `{score:.4f}` | {chunk} |"
         for idx, (chunk, score) in enumerate(_retrieved)
+    )
+
+    _tabs = mo.ui.tabs(
+        {
+            "🌌 2D Embedding Space & 128-D Barcode": mo.vstack(
+                [
+                    mo.Html(_space_map_html),
+                    mo.hstack([inspect_rank_dropdown], justify="start"),
+                    mo.Html(_barcode_html),
+                ]
+            ),
+            "📋 Top-N Retrieved Chunks Table": mo.md(
+                f"""
+                | Rank | Cosine Similarity | Retrieved Fact from `ev-facts.txt` |
+                | :--- | :--- | :--- |
+                {_rows_md}
+                """
+            ),
+            "🔍 Augmented System Prompt": mo.md(
+                f"""
+                ```text
+                SYSTEM PROMPT:
+                {_sys_prompt}
+
+                USER PROMPT:
+                {_usr_prompt}
+                ```
+                """
+            ),
+        }
     )
 
     mo.md(
@@ -306,30 +406,19 @@ def _(
 
         Type any question about electric vehicles below (e.g., *"What is the difference between LFP and NMC batteries?"*,
         *"Why do 800-volt EV architectures charge faster?"*, *"How do automotive heat pumps help in cold winter weather?"*,
-        *"Why does DC fast charging slow down above 80% state of charge?"*):
+        *"Why does DC fast charging slow down above 80% state of charge?"*) and watch the **2D Embedding Space Map**
+        and **128-D Barcode** react live:
 
         {user_query_input}
-        {top_n_slider}
+        {mo.hstack([top_n_slider, inspect_rank_dropdown], justify="start", gap=3)}
 
-        ### Step A: Top-{top_n_slider.value} Retrieved Chunks (Ranked by Cosine Similarity)
-        | Rank | Cosine Similarity | Retrieved Fact from `ev-facts.txt` |
-        | :--- | :--- | :--- |
-        {_rows_md}
+        {_tabs}
 
-        ### Step B: Augmented Prompt Sent to `Llama.app`
-        ```text
-        SYSTEM PROMPT:
-        {_sys_prompt}
-
-        USER PROMPT:
-        {_usr_prompt}
-        ```
-
-        ### Step C: Grounded LLM Response (`{_gen.model}` · `{_gen.latency_ms:.0f} ms`)
+        ### Grounded LLM Response (`{_gen.model}` · `{_gen.latency_ms:.0f} ms`)
         > {_gen.content}
 
         ---
-        **Next Up**: In `notebooks/02_chunking_and_duckdb.py`, we'll see what happens when documents are multi-page Markdown files instead of 1-line EV facts, and how to store vectors persistently inside **DuckDB**!
+        **Next Up**: In `notebooks/02_chunking_and_duckdb.py`, we'll visually explore document chunking & sliding overlap on a **Document Timeline Minimap** and index our vectors into **DuckDB**!
         """
     )
     return
