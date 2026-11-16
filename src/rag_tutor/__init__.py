@@ -16,9 +16,10 @@ from .llm_backend import (
 )
 from .chunker import (
     Chunk,
-    chunk_by_lines,
+    chunk_document,
     chunk_fixed_character,
     chunk_markdown_sections,
+    load_sample_markdown_corpus,
 )
 from .duckdb_store import DuckDBVectorStore
 from .hybrid_search import HybridSearchEngine, HybridSearchResult
@@ -50,9 +51,10 @@ __all__ = [
     "get_default_client",
     "get_default_embedder",
     "Chunk",
-    "chunk_by_lines",
+    "chunk_document",
     "chunk_fixed_character",
     "chunk_markdown_sections",
+    "load_sample_markdown_corpus",
     "DuckDBVectorStore",
     "HybridSearchEngine",
     "HybridSearchResult",

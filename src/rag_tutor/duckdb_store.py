@@ -1,29 +1,28 @@
-"""Module 5: DuckDB Embedded Vector & Full-Text Search Store.
-
-Demonstrates how DuckDB stores document chunks, metadata, and fixed-size
-`FLOAT[N]` embedding arrays, executing native `array_cosine_similarity` queries
-in SQL as well as Okapi BM25 lexical scoring.
-"""
+"""DuckDB Embedded Vector & Full-Text Search Store."""
 
 from __future__ import annotations
 
-import json
 import math
 import re
-import shutil
-import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable
 
-try:
-    import duckdb as _duckdb_mod
-except ImportError:
-    _duckdb_mod = None
+import duckdb
 
 from .chunker import Chunk
-from .llm_backend import get_default_embedder
-from .scratch_rag import cosine_similarity
+from .llm_backend import get_default_embedder, tokenize
+
+_READONLY_SQL_RE = re.compile(
+    r"^\s*(?:SELECT|WITH|DESCRIBE|SUMMARIZE|EXPLAIN|SHOW)\b",
+    re.IGNORECASE,
+)
+_FORBIDDEN_SQL_RE = re.compile(
+    r"\b(?:COPY|ATTACH|DETACH|INSTALL|LOAD|EXPORT|IMPORT|CALL|SET|PRAGMA|"
+    r"INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|"
+    r"read_csv|read_parquet|read_json|read_text|read_blob|glob|st_read)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -38,12 +37,7 @@ class DuckDBChunkRecord:
 
 
 class DuckDBVectorStore:
-    """Embedded DuckDB vector and BM25 store for RAG pipelines.
-
-    Uses the `duckdb` Python package when running inside the `uv` environment,
-    and also supports the `/opt/homebrew/bin/duckdb` CLI so SQL queries and
-    vector searches work in every environment.
-    """
+    """Embedded DuckDB vector (`FLOAT[dim]`) and Okapi BM25 store."""
 
     def __init__(
         self,
@@ -52,34 +46,39 @@ class DuckDBVectorStore:
         embed_fn: Callable[[str], list[float]] | None = None,
     ) -> None:
         self.db_path = db_path
-        self.embedding_dim = embedding_dim
+        self.embedding_dim = int(embedding_dim)
         self.embed_fn = embed_fn or get_default_embedder().embed
-        self._mem_rows: list[tuple[int, str, str, str, int, list[float]]] = []
-        self.conn = _duckdb_mod.connect(db_path) if _duckdb_mod is not None else None
-        self._duckdb_cli = shutil.which("duckdb") or "/opt/homebrew/bin/duckdb"
+        self.conn = duckdb.connect(db_path)
         self._init_schema()
 
     def _init_schema(self) -> None:
-        """Create the `rag_chunks` table with a fixed-size `FLOAT[dim]` column."""
-        if self.conn is not None:
-            self.conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS rag_chunks (
-                    chunk_id INTEGER PRIMARY KEY,
-                    doc_source VARCHAR,
-                    section_title VARCHAR,
-                    chunk_text VARCHAR,
-                    char_length INTEGER,
-                    embedding FLOAT[{self.embedding_dim}]
-                );
-                """
-            )
+        self.conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS rag_chunks (
+                chunk_id INTEGER PRIMARY KEY,
+                doc_source VARCHAR,
+                section_title VARCHAR,
+                chunk_text VARCHAR,
+                char_length INTEGER,
+                embedding FLOAT[{self.embedding_dim}]
+            );
+            """
+        )
+        if self.db_path == ":memory:":
+            self.conn.execute("SET enable_external_access = false;")
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> DuckDBVectorStore:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
     def clear(self) -> None:
         """Remove all rows from `rag_chunks`."""
-        self._mem_rows.clear()
-        if self.conn is not None:
-            self.conn.execute("DELETE FROM rag_chunks;")
+        self.conn.execute("DELETE FROM rag_chunks;")
 
     def index_chunks(self, chunks: list[Chunk], replace: bool = True) -> int:
         """Embed and insert a list of `Chunk` objects into DuckDB."""
@@ -107,8 +106,7 @@ class DuckDBVectorStore:
                 )
             )
 
-        self._mem_rows.extend(rows)
-        if self.conn is not None and rows:
+        if rows:
             self.conn.executemany(
                 """
                 INSERT OR REPLACE INTO rag_chunks
@@ -121,10 +119,8 @@ class DuckDBVectorStore:
 
     def count(self) -> int:
         """Return total number of indexed chunks in DuckDB."""
-        if self.conn is not None:
-            row = self.conn.execute("SELECT COUNT(*) FROM rag_chunks;").fetchone()
-            return int(row[0]) if row else 0
-        return len(self._mem_rows)
+        row = self.conn.execute("SELECT COUNT(*) FROM rag_chunks;").fetchone()
+        return int(row[0]) if row else 0
 
     def search_vector(
         self,
@@ -132,46 +128,33 @@ class DuckDBVectorStore:
         top_k: int = 5,
     ) -> list[DuckDBChunkRecord]:
         """Run exact cosine similarity search in DuckDB (`array_cosine_similarity`)."""
+        top_k = max(1, int(top_k))
         query_vec = self.embed_fn(query)
-        if self.conn is not None:
-            sql = f"""
-                SELECT
-                    chunk_id,
-                    doc_source,
-                    section_title,
-                    chunk_text,
-                    array_cosine_similarity(
-                        embedding,
-                        ?::FLOAT[{self.embedding_dim}]
-                    ) AS vector_score
-                FROM rag_chunks
-                ORDER BY vector_score DESC NULLS LAST
-                LIMIT ?;
-            """
-            rows = self.conn.execute(sql, [query_vec, int(top_k)]).fetchall()
-            return [
-                DuckDBChunkRecord(
-                    chunk_id=int(r[0]),
-                    doc_source=str(r[1]),
-                    section_title=str(r[2]),
-                    text=str(r[3]),
-                    score=float(r[4] or 0.0),
-                )
-                for r in rows
-            ]
-
-        scored = [
+        sql = f"""
+            SELECT
+                chunk_id,
+                doc_source,
+                section_title,
+                chunk_text,
+                array_cosine_similarity(
+                    embedding,
+                    ?::FLOAT[{self.embedding_dim}]
+                ) AS vector_score
+            FROM rag_chunks
+            ORDER BY vector_score DESC NULLS LAST
+            LIMIT ?;
+        """
+        rows = self.conn.execute(sql, [query_vec, top_k]).fetchall()
+        return [
             DuckDBChunkRecord(
-                chunk_id=cid,
-                doc_source=src,
-                section_title=sec,
-                text=txt,
-                score=round(cosine_similarity(query_vec, vec), 5),
+                chunk_id=int(r[0]),
+                doc_source=str(r[1]),
+                section_title=str(r[2]),
+                text=str(r[3]),
+                score=float(r[4] or 0.0),
             )
-            for cid, src, sec, txt, _, vec in self._mem_rows
+            for r in rows
         ]
-        scored.sort(key=lambda item: item.score, reverse=True)
-        return scored[:top_k]
 
     def search_bm25(
         self,
@@ -181,37 +164,31 @@ class DuckDBVectorStore:
         b: float = 0.75,
     ) -> list[DuckDBChunkRecord]:
         """Compute Okapi BM25 (`BM25-K1-1.2`, `b=0.75`) over chunks stored in DuckDB."""
-        if self.conn is not None:
-            rows = self.conn.execute(
-                """
-                SELECT chunk_id, doc_source, section_title, chunk_text
-                FROM rag_chunks
-                ORDER BY chunk_id ASC;
-                """
-            ).fetchall()
-        else:
-            rows = [(cid, src, sec, txt) for cid, src, sec, txt, _, _ in self._mem_rows]
-
+        top_k = max(1, int(top_k))
+        rows = self.conn.execute(
+            """
+            SELECT chunk_id, doc_source, section_title, chunk_text
+            FROM rag_chunks
+            ORDER BY chunk_id ASC;
+            """
+        ).fetchall()
         if not rows:
             return []
 
-        def tokenize_bm25(text: str) -> list[str]:
-            return re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", text.lower())
-
-        query_terms = tokenize_bm25(query)
+        query_terms = tokenize(query, stem=False)
         if not query_terms:
             return [
                 DuckDBChunkRecord(int(r[0]), str(r[1]), str(r[2]), str(r[3]), 0.0)
                 for r in rows[:top_k]
             ]
 
-        doc_tokens: list[list[str]] = [tokenize_bm25(str(r[3])) for r in rows]
+        doc_tokens = [tokenize(str(r[3]), stem=False) for r in rows]
         total_docs = len(rows)
         avg_dl = sum(len(toks) for toks in doc_tokens) / max(1, total_docs)
-
-        df: dict[str, int] = {}
-        for qt in set(query_terms):
-            df[qt] = sum(1 for toks in doc_tokens if qt in toks)
+        df = {
+            qt: sum(1 for toks in doc_tokens if qt in toks)
+            for qt in set(query_terms)
+        }
 
         scored: list[DuckDBChunkRecord] = []
         for row, toks in zip(rows, doc_tokens):
@@ -241,33 +218,15 @@ class DuckDBVectorStore:
         return scored[:top_k]
 
     def run_custom_sql(self, sql_query: str) -> list[dict[str, Any]]:
-        """Execute a SQL query against `rag_chunks` via DuckDB Python or DuckDB CLI."""
-        if self.conn is not None:
-            rel = self.conn.execute(sql_query)
-            cols = [desc[0] for desc in rel.description]
-            return [dict(zip(cols, row)) for row in rel.fetchall()]
+        """Execute a validated read-only SQL query against `rag_chunks`."""
+        stripped = re.sub(r"--[^\n]*|/\*[\s\S]*?\*/", "", sql_query).strip().rstrip(";").strip()
+        if not stripped:
+            raise ValueError("SQL query cannot be empty.")
+        if ";" in stripped:
+            raise ValueError("Only a single read-only SQL statement is allowed.")
+        if not _READONLY_SQL_RE.match(stripped) or _FORBIDDEN_SQL_RE.search(stripped):
+            raise ValueError("Only read-only SELECT/DESCRIBE/SUMMARIZE queries on rag_chunks are permitted.")
 
-        # Fallback to `/opt/homebrew/bin/duckdb -light-mode -json`
-        setup_stmts = [
-            f"CREATE TABLE rag_chunks (chunk_id INTEGER, doc_source VARCHAR, section_title VARCHAR, chunk_text VARCHAR, char_length INTEGER, embedding FLOAT[{self.embedding_dim}]);"
-        ]
-        for cid, src, sec, txt, clen, vec in self._mem_rows:
-            esc_src = src.replace("'", "''")
-            esc_sec = sec.replace("'", "''")
-            esc_txt = txt.replace("'", "''")
-            vec_lit = "[" + ", ".join(f"{v:.5f}" for v in vec) + "]"
-            setup_stmts.append(
-                f"INSERT INTO rag_chunks VALUES ({cid}, '{esc_src}', '{esc_sec}', '{esc_txt}', {clen}, {vec_lit}::FLOAT[{self.embedding_dim}]);"
-            )
-        full_sql = "\n".join(setup_stmts) + "\n" + sql_query
-        proc = subprocess.run(
-            [self._duckdb_cli, "-light-mode", "-json", ":memory:", full_sql],
-            capture_output=True,
-            text=True,
-            timeout=8,
-            check=False,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or "DuckDB CLI error")
-        out = proc.stdout.strip()
-        return json.loads(out) if out else []
+        rel = self.conn.execute(stripped)
+        cols = [desc[0] for desc in rel.description]
+        return [dict(zip(cols, row)) for row in rel.fetchall()]

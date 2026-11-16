@@ -1,15 +1,12 @@
-"""Module 4: Document Chunking Strategies & Overlap Visualization Helpers.
-
-Provides line-based, fixed-character with sliding overlap, and Markdown
-section-aware chunking strategies so learners can explore how chunk size and
-overlap affect retrieval quality.
-"""
+"""Document Chunking Strategies & Corpus Loader."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+_HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$")
 
 
 @dataclass
@@ -33,30 +30,16 @@ class Chunk:
         return len(self.text.split())
 
 
-def chunk_by_lines(text: str, doc_source: str = "ev-facts.txt") -> list[Chunk]:
-    """Split text one chunk per non-empty line (ideal for 1-fact-per-line datasets)."""
-    chunks: list[Chunk] = []
+def extract_markdown_headings(text: str) -> list[tuple[int, str]]:
+    """Return `(char_offset, heading_title)` for all `#`..`###` headings in `text`."""
+    headings: list[tuple[int, str]] = []
     cursor = 0
-    chunk_id = 1
     for line in text.splitlines(keepends=True):
-        stripped = line.strip()
-        start = cursor
-        end = cursor + len(line)
-        cursor = end
-        if len(stripped) >= 10:
-            chunks.append(
-                Chunk(
-                    chunk_id=chunk_id,
-                    doc_source=doc_source,
-                    section_title=f"Line #{chunk_id}",
-                    text=stripped,
-                    start_char=start,
-                    end_char=end,
-                    overlap_chars=0,
-                )
-            )
-            chunk_id += 1
-    return chunks
+        m = _HEADING_RE.match(line.strip())
+        if m:
+            headings.append((cursor, m.group(2).strip()))
+        cursor += len(line)
+    return headings
 
 
 def chunk_fixed_character(
@@ -68,7 +51,6 @@ def chunk_fixed_character(
     """Split text into fixed-character windows with configurable sliding overlap."""
     chunk_size = max(60, int(chunk_size))
     chunk_overlap = max(0, min(int(chunk_overlap), chunk_size - 20))
-    step = chunk_size - chunk_overlap
 
     cleaned = text.strip()
     if not cleaned:
@@ -81,7 +63,6 @@ def chunk_fixed_character(
 
     while start < n:
         end = min(start + chunk_size, n)
-        # Prefer breaking on whitespace if we are not at the end of the text
         if end < n:
             ws_pos = cleaned.rfind(" ", start + int(chunk_size * 0.6), end)
             if ws_pos != -1:
@@ -89,7 +70,6 @@ def chunk_fixed_character(
 
         snippet = cleaned[start:end].strip()
         if len(snippet) >= 15:
-            actual_overlap = chunk_overlap if chunk_id > 1 else 0
             chunks.append(
                 Chunk(
                     chunk_id=chunk_id,
@@ -98,7 +78,7 @@ def chunk_fixed_character(
                     text=snippet,
                     start_char=start,
                     end_char=end,
-                    overlap_chars=actual_overlap,
+                    overlap_chars=chunk_overlap if chunk_id > 1 else 0,
                 )
             )
             chunk_id += 1
@@ -117,16 +97,14 @@ def chunk_markdown_sections(
     doc_source: str = "document.md",
 ) -> list[Chunk]:
     """Split Markdown by headings (`#`, `##`, `###`) and subdivide long sections."""
-    lines = text.splitlines(keepends=True)
     sections: list[tuple[str, str, int, int]] = []
-
     current_title = "Introduction"
     buffer: list[str] = []
     sec_start = 0
     cursor = 0
 
-    for line in lines:
-        heading_match = re.match(r"^(#{1,3})\s+(.+)$", line.strip())
+    for line in text.splitlines(keepends=True):
+        heading_match = _HEADING_RE.match(line.strip())
         if heading_match and buffer:
             sec_text = "".join(buffer).strip()
             if len(sec_text) >= 15:
@@ -185,6 +163,29 @@ def chunk_markdown_sections(
     return chunks
 
 
+def chunk_document(
+    text: str,
+    strategy: str = "markdown",
+    chunk_size: int = 480,
+    chunk_overlap: int = 60,
+    doc_source: str = "document.md",
+) -> list[Chunk]:
+    """Dispatch document chunking by strategy (`'markdown'` or `'fixed'`)."""
+    if strategy == "fixed":
+        return chunk_fixed_character(
+            text,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            doc_source=doc_source,
+        )
+    return chunk_markdown_sections(
+        text,
+        max_chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        doc_source=doc_source,
+    )
+
+
 def load_sample_markdown_corpus(
     corpus_dir: str | Path | None = None,
     strategy: str = "markdown",
@@ -192,31 +193,22 @@ def load_sample_markdown_corpus(
     chunk_overlap: int = 80,
 ) -> list[Chunk]:
     """Load and chunk all `.md` files in `data/sample_docs/`."""
-    if corpus_dir is None:
-        corpus_dir = Path(__file__).resolve().parents[2] / "data" / "sample_docs"
-    else:
-        corpus_dir = Path(corpus_dir)
+    corpus_path = (
+        Path(__file__).resolve().parents[2] / "data" / "sample_docs"
+        if corpus_dir is None
+        else Path(corpus_dir)
+    )
 
     all_chunks: list[Chunk] = []
-    next_id = 1
-    for md_path in sorted(corpus_dir.glob("*.md")):
-        raw = md_path.read_text(encoding="utf-8")
-        if strategy == "fixed":
-            doc_chunks = chunk_fixed_character(
-                raw,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                doc_source=md_path.name,
-            )
-        else:
-            doc_chunks = chunk_markdown_sections(
-                raw,
-                max_chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                doc_source=md_path.name,
-            )
+    for md_path in sorted(corpus_path.glob("*.md")):
+        doc_chunks = chunk_document(
+            md_path.read_text(encoding="utf-8"),
+            strategy=strategy,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            doc_source=md_path.name,
+        )
         for ch in doc_chunks:
-            ch.chunk_id = next_id
-            next_id += 1
+            ch.chunk_id = len(all_chunks) + 1
             all_chunks.append(ch)
     return all_chunks
