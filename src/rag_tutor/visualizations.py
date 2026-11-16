@@ -18,6 +18,11 @@ from .agentic_rag import AgenticTrace
 from .chunker import Chunk, extract_markdown_headings
 from .hybrid_search import HybridSearchResult
 from .llm_backend import SEMANTIC_CLUSTERS, split_sentences, tokenize
+from .modular_graph_rag import (
+    GraphSearchResult,
+    ModularRAGConfig,
+    QueryExpansionResult,
+)
 from .reranker import RerankedCandidate
 from .scratch_rag import cosine_similarity
 
@@ -25,6 +30,14 @@ from .scratch_rag import cosine_similarity
 def _esc(text: str) -> str:
     """HTML-escape text for safe inclusion in SVG/HTML attributes and nodes."""
     return html.escape(str(text), quote=True)
+
+
+def _clean_mermaid_label(txt: str, max_len: int = 42) -> str:
+    """Sanitize a label string for Mermaid node text."""
+    compact = re.sub(r'["\[\]{}()<>|#`]', "", txt).strip()
+    if len(compact) > max_len:
+        compact = compact[: max_len - 2] + ".."
+    return compact
 
 
 # ---------------------------------------------------------------------------
@@ -910,22 +923,16 @@ def render_cross_attention_heatmap_svg(
 
 def build_agentic_mermaid_diagram(trace: AgenticTrace) -> str:
     """Build a dynamic Mermaid flowchart string representing a live AgenticTrace."""
-    def clean_mermaid_label(txt: str, max_len: int = 42) -> str:
-        compact = re.sub(r'["\[\]{}()<>|#`]', "", txt).strip()
-        if len(compact) > max_len:
-            compact = compact[: max_len - 2] + ".."
-        return compact
-
     lines = [
         "flowchart LR",
-        f'    Q["User Query: {clean_mermaid_label(trace.original_query, 36)}"] --> Plan{{"Query Planner ({("Multi-Hop" if trace.is_multi_hop else "Single-Hop")})"}}',
+        f'    Q["User Query: {_clean_mermaid_label(trace.original_query, 36)}"] --> Plan{{"Query Planner ({("Multi-Hop" if trace.is_multi_hop else "Single-Hop")})"}}',
     ]
 
     for step in trace.retrieval_steps:
         sq_id = f"SQ{step.step_number}"
         ch_id = f"CH{step.step_number}"
-        sq_lbl = clean_mermaid_label(step.sub_query, 32)
-        ch_lbl = f"Chunk #{step.top_chunk_id}: {clean_mermaid_label(step.top_section, 22)} ({step.rerank_score:.2f})"
+        sq_lbl = _clean_mermaid_label(step.sub_query, 32)
+        ch_lbl = f"Chunk #{step.top_chunk_id}: {_clean_mermaid_label(step.top_section, 22)} ({step.rerank_score:.2f})"
         lines.append(f'    Plan --> {sq_id}["Step {step.step_number}: {sq_lbl}"]')
         lines.append(f'    {sq_id} --> {ch_id}[("{ch_lbl}")]')
         lines.append(f"    {ch_id} --> Gate")
@@ -1083,3 +1090,248 @@ def render_ab_arena_comparison_svg(
       </div>
     </div>
     """
+
+
+# ---------------------------------------------------------------------------
+# 8. Notebook 5: Knowledge Graph Subgraph, Fusion Arena & Modular RAG Mermaid
+# ---------------------------------------------------------------------------
+
+
+def render_subgraph_traversal_svg(graph_result: GraphSearchResult) -> str:
+    """Render a layered 3-column SVG showing Seed -> 1-Hop -> 2-Hop graph traversal."""
+    triples = graph_result.matched_triples[:8]
+    if not triples:
+        return """
+        <div style="background:#0f172a;padding:14px;border-radius:12px;border:1px solid #334155;color:#94a3b8;font-size:13px;">
+          🕸️ <strong>No Knowledge Graph entities matched this query.</strong> Try including terms like
+          <code>DuckDB</code>, <code>RRF-K60</code>, <code>Cross-Encoder</code>, <code>HyDE</code>, or <code>Qdrant</code>.
+        </div>
+        """
+
+    seeds = list(graph_result.seed_entities)
+    hop_level: dict[str, int] = {s: 0 for s in seeds}
+    for triple, hop in triples:
+        for ent in (triple.subject, triple.obj):
+            if ent not in hop_level:
+                hop_level[ent] = min(2, hop)
+
+    cols: dict[int, list[str]] = {0: [], 1: [], 2: []}
+    for ent, lvl in hop_level.items():
+        cols[min(2, lvl)].append(ent)
+
+    max_rows = max(len(cols[0]), len(cols[1]), len(cols[2]), 1)
+    row_h = 46
+    width = 720
+    height = max(210, 62 + max_rows * row_h)
+    col_x = {0: 105, 1: 360, 2: 615}
+    col_colors = {
+        0: ("#0c4a6e", "#38bdf8", "Seed Match"),
+        1: ("#134e4a", "#2dd4bf", "1-Hop Entity"),
+        2: ("#3b0764", "#c084fc", "2-Hop Expansion"),
+    }
+
+    positions: dict[str, tuple[float, float, int]] = {}
+    for lvl, ents in cols.items():
+        top_offset = 46 + ((max_rows - len(ents)) * row_h) / 2.0
+        for idx, ent in enumerate(ents):
+            positions[ent] = (col_x[lvl], top_offset + idx * row_h + 14, lvl)
+
+    edges_svg: list[str] = []
+    for t_idx, (triple, hop) in enumerate(triples):
+        if triple.subject not in positions or triple.obj not in positions:
+            continue
+        x1, y1, l1 = positions[triple.subject]
+        x2, y2, l2 = positions[triple.obj]
+        edge_col = "#2dd4bf" if hop == 1 else "#a855f7"
+        if x1 == x2:
+            ctrl_x = x1 + 92
+            path_d = f"M {x1 + 75:.1f} {y1:.1f} Q {ctrl_x:.1f} {(y1 + y2) / 2:.1f}, {x2 + 75:.1f} {y2:.1f}"
+            mid_x, mid_y = ctrl_x - 8, (y1 + y2) / 2.0
+        else:
+            sx = x1 + 78 if x1 < x2 else x1 - 78
+            ex = x2 - 78 if x1 < x2 else x2 + 78
+            path_d = f"M {sx:.1f} {y1:.1f} L {ex:.1f} {y2:.1f}"
+            mid_x = (sx + ex) / 2.0
+            mid_y = (y1 + y2) / 2.0 + (-7 if t_idx % 2 == 0 else 9)
+
+        edges_svg.append(
+            f'<g>'
+            f'<path d="{path_d}" fill="none" stroke="{edge_col}" stroke-width="1.8" opacity="0.85">'
+            f'<title>{_esc(triple.subject)} --[{_esc(triple.predicate)}]--> {_esc(triple.obj)} (Chunk #{triple.source_chunk_id})</title></path>'
+            f'<text x="{mid_x:.1f}" y="{mid_y:.1f}" fill="#cbd5e1" font-size="9" font-family="monospace" text-anchor="middle">'
+            f'{_esc(triple.predicate[:18])}</text>'
+            f'</g>'
+        )
+
+    nodes_svg: list[str] = []
+    for ent, (nx, ny, lvl) in positions.items():
+        bg, border, role_lbl = col_colors[lvl]
+        short_ent = ent[:20] + (".." if len(ent) > 20 else "")
+        nodes_svg.append(
+            f'<g>'
+            f'<rect x="{nx - 78:.1f}" y="{ny - 15:.1f}" width="156" height="30" rx="7" fill="{bg}" stroke="{border}" stroke-width="1.6">'
+            f'<title>{_esc(ent)} ({role_lbl})</title></rect>'
+            f'<text x="{nx:.1f}" y="{ny + 4:.1f}" fill="#f8fafc" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">'
+            f'{_esc(short_ent)}</text>'
+            f'</g>'
+        )
+
+    return f"""
+    <div style="background:#0f172a;padding:12px 14px;border-radius:12px;border:1px solid #334155;color:#f8fafc;margin:10px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+        <span style="font-size:13px;font-weight:700;color:#e2e8f0;">
+          🕸️ Knowledge Graph 1–2 Hop Subgraph Traversal ({len(triples)} Triples Matched)
+        </span>
+        <span style="font-size:11px;">
+          <span style="color:#38bdf8;">■ Seed Entities</span> ·
+          <span style="color:#2dd4bf;">■ 1-Hop Neighbors</span> ·
+          <span style="color:#c084fc;">■ 2-Hop Expansion</span>
+        </span>
+      </div>
+      <div style="overflow-x:auto;">
+        <svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" style="background:#020617;border-radius:8px;border:1px solid #1e293b;width:100%;max-width:{width}px;">
+          <text x="{col_x[0]}" y="24" fill="#38bdf8" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">QUERY SEEDS</text>
+          <text x="{col_x[1]}" y="24" fill="#2dd4bf" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">1-HOP NEIGHBORS</text>
+          <text x="{col_x[2]}" y="24" fill="#c084fc" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">2-HOP EXPANSION</text>
+          {"".join(edges_svg)}
+          {"".join(nodes_svg)}
+        </svg>
+      </div>
+    </div>
+    """
+
+
+def render_fusion_comparison_svg(
+    rrf_results: list[HybridSearchResult],
+    convex_results: list[HybridSearchResult],
+    alpha: float,
+    rrf_k: int,
+) -> str:
+    """Render side-by-side RRF vs. Min-Max Convex Combination score breakdown bars."""
+    if not rrf_results or not convex_results:
+        return ""
+
+    top_n = min(5, len(rrf_results), len(convex_results))
+    rrf_slice = rrf_results[:top_n]
+    conv_slice = convex_results[:top_n]
+    rrf_rank_map = {r.chunk_id: r.final_rank for r in rrf_results}
+    max_rrf = max([1.0 / max(10, rrf_k)] + [r.rrf_score for r in rrf_slice])
+
+    row_h = 34
+    height = 56 + top_n * row_h
+    width = 680
+
+    rrf_bars: list[str] = []
+    for idx, r in enumerate(rrf_slice):
+        y = 38 + idx * row_h
+        vec_part = alpha / (rrf_k + r.vector_rank)
+        bm25_part = max(0.0, r.rrf_score - vec_part)
+        vw = (vec_part / max_rrf) * 145.0
+        bw = (bm25_part / max_rrf) * 145.0
+        rrf_bars.append(
+            f'<g>'
+            f'<text x="12" y="{y + 13}" fill="#f8fafc" font-size="10.5" font-weight="bold" font-family="monospace">#{r.final_rank} Chunk {r.chunk_id}</text>'
+            f'<text x="12" y="{y + 24}" fill="#64748b" font-size="9" font-family="monospace">V#{r.vector_rank} / B#{r.bm25_rank}</text>'
+            f'<rect x="108" y="{y + 4}" width="145" height="17" rx="4" fill="#1e293b"/>'
+            f'<rect x="108" y="{y + 4}" width="{vw:.1f}" height="17" rx="3" fill="#2dd4bf"/>'
+            f'<rect x="{108 + vw:.1f}" y="{y + 4}" width="{bw:.1f}" height="17" rx="3" fill="#f59e0b"/>'
+            f'<text x="260" y="{y + 16}" fill="#e2e8f0" font-size="10" font-family="monospace">{r.rrf_score:.4f}</text>'
+            f'</g>'
+        )
+
+    conv_bars: list[str] = []
+    for idx, c in enumerate(conv_slice):
+        y = 38 + idx * row_h
+        vec_part = alpha * c.norm_vector_score
+        bm25_part = (1.0 - alpha) * c.norm_bm25_score
+        vw = min(145.0, vec_part * 145.0)
+        bw = min(145.0 - vw, bm25_part * 145.0)
+        prev_rank = rrf_rank_map.get(c.chunk_id, c.final_rank)
+        shift = prev_rank - c.final_rank
+        shift_txt = f"↑+{shift}" if shift > 0 else (f"↓{shift}" if shift < 0 else "=")
+        shift_col = "#2dd4bf" if shift > 0 else ("#f43f5e" if shift < 0 else "#64748b")
+        conv_bars.append(
+            f'<g>'
+            f'<text x="355" y="{y + 13}" fill="#f8fafc" font-size="10.5" font-weight="bold" font-family="monospace">#{c.final_rank} Chunk {c.chunk_id}</text>'
+            f'<text x="355" y="{y + 24}" fill="{shift_col}" font-size="9" font-family="monospace">vs RRF: {shift_txt}</text>'
+            f'<rect x="452" y="{y + 4}" width="145" height="17" rx="4" fill="#1e293b"/>'
+            f'<rect x="452" y="{y + 4}" width="{vw:.1f}" height="17" rx="3" fill="#2dd4bf"/>'
+            f'<rect x="{452 + vw:.1f}" y="{y + 4}" width="{bw:.1f}" height="17" rx="3" fill="#f59e0b"/>'
+            f'<text x="604" y="{y + 16}" fill="#e2e8f0" font-size="10" font-family="monospace">{c.convex_score:.3f}</text>'
+            f'</g>'
+        )
+
+    return f"""
+    <div style="background:#0f172a;padding:12px 14px;border-radius:12px;border:1px solid #334155;color:#f8fafc;margin:10px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+        <span style="font-size:13px;font-weight:700;color:#e2e8f0;">
+          ⚖️ Score Fusion Arena: Reciprocal Rank Fusion (k={rrf_k}) vs. Convex Combination (α={alpha:.1f})
+        </span>
+        <span style="font-size:11px;">
+          <span style="color:#2dd4bf;">█ Dense Vector ({alpha:.0%})</span> ·
+          <span style="color:#f59e0b;">█ Sparse BM25 ({1.0 - alpha:.0%})</span>
+        </span>
+      </div>
+      <div style="overflow-x:auto;">
+        <svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" style="background:#020617;border-radius:8px;border:1px solid #1e293b;width:100%;max-width:{width}px;">
+          <text x="12" y="22" fill="#38bdf8" font-size="11" font-weight="bold" font-family="monospace">Reciprocal Rank Fusion (Rank-Based)</text>
+          <text x="355" y="22" fill="#c084fc" font-size="11" font-weight="bold" font-family="monospace">Convex Linear Blend (Min-Max [0..1])</text>
+          <line x1="340" y1="12" x2="340" y2="{height - 12}" stroke="#1e293b" stroke-width="1"/>
+          {"".join(rrf_bars)}
+          {"".join(conv_bars)}
+        </svg>
+      </div>
+    </div>
+    """
+
+
+def build_modular_rag_mermaid(
+    config: ModularRAGConfig,
+    expansion: QueryExpansionResult | None = None,
+    graph_result: GraphSearchResult | None = None,
+) -> str:
+    """Build a dynamic Mermaid diagram showing active Modular RAG stages."""
+    if config.expansion_mode == "multi_query":
+        n_q = len(expansion.expanded_queries) if expansion else 3
+        pre_node = f'Pre["Multi-Query Expansion ({n_q} variants)"]'
+    elif config.expansion_mode == "hyde":
+        pre_node = 'Pre["HyDE: Hypothetical Answer Embedding"]'
+    else:
+        pre_node = 'Pre["Direct Query (No Expansion)"]'
+
+    fusion_lbl = (
+        f"RRF Fusion (k={config.rrf_k}, α={config.alpha:.1f})"
+        if config.fusion_method == "rrf"
+        else f"Convex Blend (α={config.alpha:.1f} Vec + {1.0 - config.alpha:.1f} BM25)"
+    )
+
+    lines = [
+        "flowchart LR",
+        '    Q["User Query"] --> ' + pre_node,
+    ]
+    if config.enable_dense_sparse:
+        sql_note = (
+            f" + SQL Filter ({_clean_mermaid_label(config.department or 'all', 18)}, since {config.min_year or 'any'})"
+            if (config.department and config.department != "all") or config.min_year is not None
+            else ""
+        )
+        lines.append(f'    Pre --> Dense["Dense Vector Search (DuckDB 128-D){sql_note}"]')
+        lines.append('    Pre --> Sparse["Sparse Keyword Search (Okapi BM25)"]')
+        lines.append(f'    Dense --> Fuse{{"{fusion_lbl}"}}')
+        lines.append("    Sparse --> Fuse")
+    else:
+        lines.append(f'    Pre --> Fuse{{"{fusion_lbl}"}}')
+
+    if config.enable_graph:
+        n_triples = len(graph_result.matched_triples) if graph_result else 0
+        lines.append(f'    Pre --> Graph[("Knowledge Graph ({n_triples} triples)")]')
+        lines.append("    Graph --> Fuse")
+
+    if config.use_reranker:
+        lines.append(f'    Fuse --> Rerank["Stage-2 Cross-Encoder (Top-{config.stage1_k} -> Top-{config.final_top_k})"]')
+    else:
+        lines.append(f'    Fuse --> Rerank["Reranker Bypassed (Top-{config.final_top_k})"]')
+
+    lines.append('    Rerank --> LLM["Grounded LLM Synthesis (Llama.app)"]')
+    return "\n".join(lines)
+

@@ -25,8 +25,20 @@ from .duckdb_store import DuckDBVectorStore
 from .hybrid_search import HybridSearchEngine, HybridSearchResult
 from .reranker import CrossEncoderReranker, RerankedCandidate
 from .agentic_rag import AgenticRAGPipeline, AgenticTrace
+from .modular_graph_rag import (
+    GraphSearchResult,
+    KnowledgeGraphStore,
+    KnowledgeTriple,
+    ModularCandidate,
+    ModularRAGConfig,
+    ModularRAGPipeline,
+    ModularRAGTrace,
+    QueryExpander,
+    QueryExpansionResult,
+)
 from .visualizations import (
     build_agentic_mermaid_diagram,
+    build_modular_rag_mermaid,
     build_studio_pipeline_mermaid,
     render_2d_compass_svg,
     render_ab_arena_comparison_svg,
@@ -35,8 +47,10 @@ from .visualizations import (
     render_embedding_barcode_svg,
     render_embedding_space_2d_svg,
     render_faithfulness_audit_svg,
+    render_fusion_comparison_svg,
     render_hybrid_rrf_svg,
     render_rerank_slopegraph_svg,
+    render_subgraph_traversal_svg,
 )
 
 __all__ = [
@@ -62,7 +76,17 @@ __all__ = [
     "RerankedCandidate",
     "AgenticRAGPipeline",
     "AgenticTrace",
+    "KnowledgeTriple",
+    "GraphSearchResult",
+    "KnowledgeGraphStore",
+    "QueryExpansionResult",
+    "QueryExpander",
+    "ModularRAGConfig",
+    "ModularCandidate",
+    "ModularRAGTrace",
+    "ModularRAGPipeline",
     "build_agentic_mermaid_diagram",
+    "build_modular_rag_mermaid",
     "build_studio_pipeline_mermaid",
     "render_2d_compass_svg",
     "render_ab_arena_comparison_svg",
@@ -71,6 +95,8 @@ __all__ = [
     "render_embedding_barcode_svg",
     "render_embedding_space_2d_svg",
     "render_faithfulness_audit_svg",
+    "render_fusion_comparison_svg",
     "render_hybrid_rrf_svg",
     "render_rerank_slopegraph_svg",
+    "render_subgraph_traversal_svg",
 ]
