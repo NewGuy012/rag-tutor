@@ -9,10 +9,15 @@ from rag_tutor import (
     CrossEncoderReranker,
     DuckDBVectorStore,
     HybridSearchEngine,
+    KnowledgeGraphStore,
     LlamaMacOSClient,
     LocalEmbeddingEngine,
+    ModularRAGConfig,
+    ModularRAGPipeline,
+    QueryExpander,
     SimpleVectorDB,
     build_agentic_mermaid_diagram,
+    build_modular_rag_mermaid,
     build_rag_prompt,
     chunk_document,
     cosine_similarity,
@@ -20,8 +25,10 @@ from rag_tutor import (
     load_ev_facts,
     load_sample_markdown_corpus,
     render_embedding_barcode_svg,
+    render_fusion_comparison_svg,
     render_hybrid_rrf_svg,
     render_rerank_slopegraph_svg,
+    render_subgraph_traversal_svg,
     vector_norm,
 )
 
@@ -110,6 +117,74 @@ class TestRAGTutor(unittest.TestCase):
         self.assertTrue(trace.is_multi_hop)
         self.assertGreaterEqual(len(trace.planned_sub_queries), 2)
         self.assertIn("flowchart LR", build_agentic_mermaid_diagram(trace))
+
+    def test_metadata_filtering_and_convex_fusion(self) -> None:
+        meta = self.store.list_metadata_values()
+        self.assertIn("advanced-architecture", meta["departments"])
+        filtered = self.store.search_vector_filtered(
+            "Convex Combination and HyDE",
+            top_k=4,
+            department="advanced-architecture",
+            min_year=2026,
+        )
+        self.assertGreaterEqual(len(filtered), 1)
+        self.assertTrue(all(r.department == "advanced-architecture" for r in filtered))
+        self.assertTrue(all(r.updated_year >= 2026 for r in filtered))
+
+        rrf_hits = self.hybrid.search("CONVEX-ALPHA-70", top_k=5, alpha=0.7, fusion_method="rrf")
+        conv_hits = self.hybrid.search("CONVEX-ALPHA-70", top_k=5, alpha=0.7, fusion_method="convex")
+        self.assertEqual(len(rrf_hits), 5)
+        self.assertEqual(len(conv_hits), 5)
+        self.assertTrue(all(0.0 <= h.norm_vector_score <= 1.0 for h in conv_hits))
+        self.assertTrue(all(0.0 <= h.norm_bm25_score <= 1.0 for h in conv_hits))
+        self.assertEqual(conv_hits[0].fusion_method, "convex")
+        self.assertIn("<svg", render_fusion_comparison_svg(rrf_hits, conv_hits, 0.7, 60))
+
+        with self.assertRaises(ValueError):
+            self.hybrid.search("test", fusion_method="invalid")
+
+    def test_graph_expansion_and_modular_rag(self) -> None:
+        graph = KnowledgeGraphStore(self.chunks)
+        self.assertGreaterEqual(len(graph.triples), 10)
+        g_res = graph.search("How does DuckDB relate to RRF-K60 and Cross-Encoder?", max_hops=2)
+        self.assertGreaterEqual(len(g_res.seed_entities), 1)
+        self.assertGreaterEqual(len(g_res.matched_triples), 1)
+        self.assertIn("<svg", render_subgraph_traversal_svg(g_res))
+
+        client = LlamaMacOSClient()
+        expander = QueryExpander(client)
+        mq = expander.expand("How does GraphRAG work?", mode="multi_query", model="educational-fallback")
+        self.assertGreaterEqual(len(mq.expanded_queries), 3)
+        hyde = expander.expand("How does HyDE improve retrieval?", mode="hyde", model="educational-fallback")
+        self.assertTrue(len(hyde.hypothetical_doc) > 30)
+
+        modular = ModularRAGPipeline(
+            store=self.store,
+            chunks=self.chunks,
+            hybrid_engine=self.hybrid,
+            graph_store=graph,
+            reranker=self.reranker,
+            expander=expander,
+            llm_client=client,
+            embed_fn=self.embedder.embed,
+        )
+        cfg = ModularRAGConfig(
+            expansion_mode="hyde",
+            enable_dense_sparse=True,
+            enable_graph=True,
+            fusion_method="convex",
+            alpha=0.7,
+            use_reranker=True,
+            final_top_k=3,
+        )
+        trace = modular.run(
+            "How does HyDE work with Convex Combination and Cross-Encoder reranking?",
+            config=cfg,
+            model="educational-fallback",
+        )
+        self.assertEqual(len(trace.final_candidates), 3)
+        self.assertTrue(all(c.rerank_score is not None for c in trace.final_candidates))
+        self.assertIn("flowchart LR", build_modular_rag_mermaid(cfg, trace.expansion, trace.graph_result))
 
 
 if __name__ == "__main__":
