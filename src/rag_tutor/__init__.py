@@ -40,6 +40,7 @@ from .visualizations import (
     render_hybrid_rrf_svg,
     render_rerank_slopegraph_svg,
     render_subgraph_traversal_svg,
+    render_vector_hits_card,
 )
 
 __all__ = [
@@ -76,5 +77,6 @@ __all__ = [
     "render_hybrid_rrf_svg",
     "render_rerank_slopegraph_svg",
     "render_subgraph_traversal_svg",
+    "render_vector_hits_card",
     "vector_norm",
 ]

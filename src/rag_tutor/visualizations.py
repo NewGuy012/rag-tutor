@@ -9,6 +9,7 @@ from typing import Sequence
 
 from .agentic_rag import AgenticTrace
 from .chunker import Chunk, extract_markdown_headings
+from .duckdb_store import DuckDBChunkRecord
 from .hybrid_search import HybridSearchResult
 from .llm_backend import SEMANTIC_CLUSTERS, split_sentences, tokenize
 from .modular_graph_rag import (
@@ -25,11 +26,15 @@ def _esc(text: str) -> str:
     return html.escape(str(text), quote=True)
 
 
+def _trunc(text: str, max_len: int, ellipsis: str = "..") -> str:
+    """Truncate `text` to `max_len` characters with `ellipsis`."""
+    return text[: max_len - len(ellipsis)] + ellipsis if len(text) > max_len else text
+
+
 def _clean_mermaid_label(txt: str, max_len: int = 42) -> str:
     """Sanitize a label string for Mermaid node text."""
     compact = re.sub(r'["\[\]{}()<>|#`\\;\r\n\t]+', " ", str(txt))
-    compact = re.sub(r"\s+", " ", compact).strip()
-    return compact[: max_len - 2] + ".." if len(compact) > max_len else compact
+    return _trunc(re.sub(r"\s+", " ", compact).strip(), max_len)
 
 
 def _card_shell(
@@ -64,6 +69,29 @@ def _svg_frame(width: int, height: int, inner: str, responsive: bool = True) -> 
     )
 
 
+def _metric_row(
+    left_html: str, right_html: str, pct: float, fill: str, *,
+    bar_h: int = 8, marker_pct: float | None = None, marker_color: str = "#fbbf24",
+    marker_title: str = "", boxed: bool = False, sub_html: str = "",
+) -> str:
+    title_attr = f' title="{_esc(marker_title)}"' if marker_title else ""
+    marker = (
+        f'<div style="position:absolute;left:{marker_pct:.1f}%;top:0;bottom:0;width:1.5px;background:{marker_color};"{title_attr}></div>'
+        if marker_pct is not None else ""
+    )
+    bar = (
+        f'<div style="background:#1e293b;height:{bar_h}px;border-radius:4px;position:relative;overflow:hidden;">'
+        f'{marker}<div style="width:{pct:.1f}%;background:{fill};height:100%;border-radius:4px;"></div></div>'
+    )
+    inner = (
+        f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:4px;flex-wrap:wrap;">'
+        f'{left_html}{right_html}</div>{bar}{sub_html}'
+    )
+    if boxed:
+        return f'<div style="background:#020617;padding:8px 12px;border-radius:8px;border:1px solid #1e293b;margin-bottom:8px;">{inner}</div>'
+    return f'<div style="margin-bottom:10px;">{inner}</div>'
+
+
 def _stacked_bar_row(
     y: int,
     x_lbl: int,
@@ -80,8 +108,8 @@ def _stacked_bar_row(
     bm25_tip: str = "",
 ) -> str:
     """Render one stacked Dense (teal) + BM25 (amber) horizontal bar row."""
-    v_tip = f"<title>{vec_tip}</title>" if vec_tip else ""
-    b_tip = f"<title>{bm25_tip}</title>" if bm25_tip else ""
+    v_tip = f"<title>{_esc(vec_tip)}</title>" if vec_tip else ""
+    b_tip = f"<title>{_esc(bm25_tip)}</title>" if bm25_tip else ""
     return (
         f"<g>"
         f'<text x="{x_lbl}" y="{y + 13}" fill="#f8fafc" font-size="10.5" font-weight="bold" font-family="monospace">{_esc(title)}</text>'
@@ -89,8 +117,26 @@ def _stacked_bar_row(
         f'<rect x="{x_bar}" y="{y + 4}" width="{bar_w}" height="17" rx="4" fill="#1e293b"/>'
         f'<rect x="{x_bar}" y="{y + 4}" width="{vw:.1f}" height="17" rx="3" fill="#2dd4bf">{v_tip}</rect>'
         f'<rect x="{x_bar + vw:.1f}" y="{y + 4}" width="{bw:.1f}" height="17" rx="3" fill="#f59e0b">{b_tip}</rect>'
-        f'<text x="{x_score}" y="{y + 16}" fill="#e2e8f0" font-size="10" font-family="monospace">{score_txt}</text>'
+        f'<text x="{x_score}" y="{y + 16}" fill="#e2e8f0" font-size="10" font-family="monospace">{_esc(score_txt)}</text>'
         f"</g>"
+    )
+
+
+def _rrf_bar_parts(
+    result: HybridSearchResult,
+    alpha: float,
+    rrf_k: int,
+    max_rrf: float,
+    bar_w: float,
+) -> tuple[float, float, float, float]:
+    """Compute `(vec_contrib, bm25_contrib, vec_width, bm25_width)` for stacked RRF bars."""
+    vec_contrib = alpha / (rrf_k + result.vector_rank)
+    bm25_contrib = max(0.0, result.rrf_score - vec_contrib)
+    return (
+        vec_contrib,
+        bm25_contrib,
+        (vec_contrib / max_rrf) * bar_w,
+        (bm25_contrib / max_rrf) * bar_w,
     )
 
 
@@ -150,14 +196,10 @@ def render_2d_compass_svg(
         verdict, verdict_color = "🔴 Opposite Semantic Direction (< 0)", "#f87171"
 
     def _gauge(title_html: str, val_html: str, val_color: str, pct: float, bar_bg: str, mid_tick: bool = False) -> str:
-        tick = '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#475569;"></div>' if mid_tick else ""
-        return (
-            f'<div style="margin-bottom:12px;">'
-            f'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">'
-            f'<span style="color:#cbd5e1;">{title_html}</span>'
-            f'<span style="font-family:monospace;color:{val_color};font-weight:700;">{val_html}</span></div>'
-            f'<div style="background:#1e293b;height:10px;border-radius:5px;overflow:hidden;position:relative;">'
-            f'{tick}<div style="width:{pct:.1f}%;background:{bar_bg};height:100%;border-radius:5px;"></div></div></div>'
+        return _metric_row(
+            f'<span style="color:#cbd5e1;">{title_html}</span>',
+            f'<span style="font-family:monospace;color:{val_color};font-weight:700;">{val_html}</span>',
+            pct, bar_bg, bar_h=10, marker_pct=50.0 if mid_tick else None, marker_color="#475569",
         )
 
     gauges = "".join([
@@ -516,6 +558,29 @@ def render_chunk_timeline_svg(
     )
 
 
+def render_vector_hits_card(hits: Sequence[DuckDBChunkRecord], top_k: int) -> str:
+    """Render ranked DuckDB vector search result bars inside a dark card."""
+    rows = [
+        _metric_row(
+            f'<span style="color:#f8fafc;font-family:monospace;"><strong>#{idx + 1}</strong> · '
+            f'<code>{_esc(r.doc_source)}</code> &gt; <strong>{_esc(r.section_title)}</strong> (Chunk #{r.chunk_id})</span>',
+            f'<span style="color:#2dd4bf;font-family:monospace;font-weight:700;">vector_score = {r.score:.4f}</span>',
+            max(5.0, min(100.0, r.score * 100.0)),
+            "linear-gradient(90deg,#0284c7,#2dd4bf)",
+            boxed=True,
+            sub_html=f'<div style="font-size:12px;color:#94a3b8;font-family:ui-monospace,monospace;margin-top:5px;">'
+            f'{_esc(_trunc(r.text.replace(chr(10), " "), 145, "..."))}</div>',
+        )
+        for idx, r in enumerate(hits)
+    ]
+    return _card_shell(
+        f"📊 DuckDB Cosine Similarity Ranking (Top-{top_k} Results)",
+        "",
+        "".join(rows) or '<div style="color:#94a3b8;font-size:12px;">Enter a query to search DuckDB.</div>',
+        margin="8px 0",
+    )
+
+
 def render_hybrid_rrf_svg(
     hybrid_results: list[HybridSearchResult],
     alpha: float,
@@ -528,23 +593,22 @@ def render_hybrid_rrf_svg(
     max_rrf = max([1.0 / max(10, rrf_k)] + [r.rrf_score for r in hybrid_results])
     bars_svg: list[str] = []
     for idx, r in enumerate(hybrid_results):
-        vec_contrib = alpha / (rrf_k + r.vector_rank)
-        bm25_contrib = max(0.0, r.rrf_score - vec_contrib)
+        vec_c, bm25_c, vw, bw = _rrf_bar_parts(r, alpha, rrf_k, max_rrf, 185.0)
         bars_svg.append(
             _stacked_bar_row(
                 y=36 + idx * 34,
                 x_lbl=10,
                 x_bar=135,
                 bar_w=185,
-                x_score=135 + int((vec_contrib / max_rrf) * 185 + (bm25_contrib / max_rrf) * 185) + 6,
+                x_score=135 + int(vw + bw) + 6,
                 title=f"#{r.final_rank} Chunk {r.chunk_id}",
                 subtitle=f"V:#{r.vector_rank} B:#{r.bm25_rank}",
                 sub_color="#94a3b8",
-                vw=(vec_contrib / max_rrf) * 185,
-                bw=(bm25_contrib / max_rrf) * 185,
+                vw=vw,
+                bw=bw,
                 score_txt=f"{r.rrf_score:.4f}",
-                vec_tip=f"Vector RRF part: {vec_contrib:.5f} (Vector Rank #{r.vector_rank}, cos={r.vector_score:.3f})",
-                bm25_tip=f"BM25 RRF part: {bm25_contrib:.5f} (BM25 Rank #{r.bm25_rank}, bm25={r.bm25_score:.2f})",
+                vec_tip=f"Vector RRF part: {vec_c:.5f} (Vector Rank #{r.vector_rank}, cos={r.vector_score:.3f})",
+                bm25_tip=f"BM25 RRF part: {bm25_c:.5f} (BM25 Rank #{r.bm25_rank}, bm25={r.bm25_score:.2f})",
             )
         )
 
@@ -583,11 +647,6 @@ def render_hybrid_rrf_svg(
     )
 
 
-# ---------------------------------------------------------------------------
-# 6. Notebook 3: Stage-1 -> Stage-2 Reranking Slopegraph & Cross-Attention Matrix
-# ---------------------------------------------------------------------------
-
-
 def render_rerank_slopegraph_svg(
     all_reranked: list[RerankedCandidate],
     top_k: int,
@@ -620,7 +679,7 @@ def render_rerank_slopegraph_svg(
             f'fill="none" stroke="{col}" stroke-width="{stroke_w}" opacity="{opacity}">'
             f'<title>Chunk #{item.chunk_id} ({_esc(item.section_title)}): Stage-1 #{item.stage1_rank} → Stage-2 #{item.stage2_rank} (CE={item.rerank_score:.4f})</title></path>'
         )
-        short_sec = item.section_title[:22] + (".." if len(item.section_title) > 22 else "")
+        short_sec = _trunc(item.section_title, 22)
         nodes_svg.append(
             f'<g><circle cx="{x_left}" cy="{y1}" r="5" fill="#64748b"/>'
             f'<text x="{x_left - 10}" y="{y1 + 4}" fill="#cbd5e1" font-size="10.5" font-family="monospace" text-anchor="end">'
@@ -674,10 +733,9 @@ def render_cross_attention_heatmap_svg(
     for r_idx, sent in enumerate(sentences):
         y = pad_t + r_idx * row_h
         s_set = set(tokenize(sent, stem=False, drop_stopwords=True))
-        short_sent = sent[:24] + ("..." if len(sent) > 24 else "")
         cells_svg.append(
             f'<text x="10" y="{y + 17}" fill="#cbd5e1" font-size="10" font-family="monospace">'
-            f'S{r_idx + 1}: {_esc(short_sent)}<title>{_esc(sent)}</title></text>'
+            f'S{r_idx + 1}: {_esc(_trunc(sent, 24, "..."))}<title>{_esc(sent)}</title></text>'
         )
         for c_idx, qt in enumerate(q_tokens):
             x = pad_l + c_idx * col_w
@@ -735,10 +793,8 @@ def render_faithfulness_audit_svg(trace: AgenticTrace) -> str:
     """Render visual confidence bars for audited claims in an AgenticTrace."""
     if not trace.verifications:
         return ""
-    rows_html: list[str] = []
+    rows_html = []
     for idx, v in enumerate(trace.verifications):
-        pct = max(4.0, min(100.0, v.confidence * 100.0))
-        color = "#2dd4bf" if v.is_grounded else "#f43f5e"
         badge = (
             f'<span style="background:#064e3b;color:#6ee7b7;padding:2px 7px;border-radius:4px;font-family:monospace;font-size:11px;">'
             f"✅ Cited Chunk #{v.supporting_chunk_id} ({v.confidence:.2f})</span>"
@@ -746,14 +802,13 @@ def render_faithfulness_audit_svg(trace: AgenticTrace) -> str:
             else f'<span style="background:#4c0519;color:#fda4af;padding:2px 7px;border-radius:4px;font-family:monospace;font-size:11px;">'
             f"⚠️ Unverified ({v.confidence:.2f})</span>"
         )
-        rows_html.append(
-            f'<div style="margin-bottom:8px;background:#020617;padding:8px 12px;border-radius:8px;border:1px solid #1e293b;">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap;">'
-            f'<span style="font-size:12px;color:#e2e8f0;flex:1;"><strong>Claim #{idx + 1}:</strong> {_esc(v.claim)}</span>{badge}</div>'
-            f'<div style="background:#1e293b;height:7px;border-radius:4px;position:relative;overflow:hidden;">'
-            f'<div style="position:absolute;left:35%;top:0;bottom:0;width:1.5px;background:#fbbf24;" title="Verification Threshold (0.35)"></div>'
-            f'<div style="width:{pct:.1f}%;background:{color};height:100%;border-radius:4px;"></div></div></div>'
-        )
+        rows_html.append(_metric_row(
+            f'<span style="color:#e2e8f0;flex:1;"><strong>Claim #{idx + 1}:</strong> {_esc(v.claim)}</span>',
+            badge,
+            max(4.0, min(100.0, v.confidence * 100.0)),
+            "#2dd4bf" if v.is_grounded else "#f43f5e",
+            bar_h=7, marker_pct=35.0, marker_title="Verification Threshold (0.35)", boxed=True,
+        ))
     return _card_shell(
         f"🛡️ Claim-by-Claim Grounding & Faithfulness Meter (Overall: {trace.faithfulness_score:.0%})",
         '<span style="color:#fbbf24;font-family:monospace;">│ Amber Line = 0.35 Grounding Threshold</span>',
@@ -801,29 +856,20 @@ def render_ab_arena_comparison_svg(
 
     def _bar_rows(items: list[tuple[str, float, str]], val_color: str, bar_fill: str) -> str:
         return "".join(
-            f'<div style="margin-bottom:8px;">'
-            f'<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px;">'
-            f'<span style="color:#e2e8f0;font-family:monospace;"><strong>#{i + 1}</strong> {_esc(lbl)}</span>'
-            f'<span style="color:{val_color};font-family:monospace;font-weight:700;">{sc_lbl}</span></div>'
-            f'<div style="background:#1e293b;height:8px;border-radius:4px;overflow:hidden;">'
-            f'<div style="width:{pct:.1f}%;background:{bar_fill};height:100%;border-radius:4px;"></div></div></div>'
+            _metric_row(
+                f'<span style="color:#e2e8f0;font-family:monospace;"><strong>#{i + 1}</strong> {_esc(lbl)}</span>',
+                f'<span style="color:{val_color};font-family:monospace;font-weight:700;">{sc_lbl}</span>',
+                pct, bar_fill,
+            )
             for i, (lbl, pct, sc_lbl) in enumerate(items)
         )
 
     items_a = [
-        (
-            txt[:68].replace("\n", " ") + ("..." if len(txt) > 68 else ""),
-            max(5.0, min(100.0, sc * 100.0)),
-            f"cos={sc:.3f}",
-        )
+        (_trunc(txt.replace("\n", " "), 68, "..."), max(5.0, min(100.0, sc * 100.0)), f"cos={sc:.3f}")
         for txt, sc in baseline_hits
     ]
     items_b = [
-        (
-            lbl[:54],
-            max(8.0, min(100.0, (sc * 100.0) if sc > 0.05 else (sc * 3200.0))),
-            f"score={sc:.3f}",
-        )
+        (lbl[:54], max(8.0, min(100.0, (sc * 100.0) if sc > 0.05 else (sc * 3200.0))), f"score={sc:.3f}")
         for lbl, sc, _ in prod_chunks
     ]
     return f"""
@@ -900,7 +946,7 @@ def render_subgraph_traversal_svg(graph_result: GraphSearchResult) -> str:
         f'<g><rect x="{nx - 78:.1f}" y="{ny - 15:.1f}" width="156" height="30" rx="7" fill="{col_colors[lvl][0]}" stroke="{col_colors[lvl][1]}" stroke-width="1.6">'
         f'<title>{_esc(ent)} ({col_colors[lvl][2]})</title></rect>'
         f'<text x="{nx:.1f}" y="{ny + 4:.1f}" fill="#f8fafc" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">'
-        f'{_esc(ent[:20] + (".." if len(ent) > 20 else ""))}</text></g>'
+        f'{_esc(_trunc(ent, 20))}</text></g>'
         for ent, (nx, ny, lvl) in positions.items()
     ]
 
@@ -946,11 +992,12 @@ def render_fusion_comparison_svg(
             title=f"#{r.final_rank} Chunk {r.chunk_id}",
             subtitle=f"V#{r.vector_rank} / B#{r.bm25_rank}",
             sub_color="#64748b",
-            vw=((alpha / (rrf_k + r.vector_rank)) / max_rrf) * 145.0,
-            bw=(max(0.0, r.rrf_score - alpha / (rrf_k + r.vector_rank)) / max_rrf) * 145.0,
+            vw=vw,
+            bw=bw,
             score_txt=f"{r.rrf_score:.4f}",
         )
         for idx, r in enumerate(rrf_slice)
+        for _, _, vw, bw in (_rrf_bar_parts(r, alpha, rrf_k, max_rrf, 145.0),)
     ]
 
     conv_bars: list[str] = []
@@ -1016,8 +1063,9 @@ def build_modular_rag_mermaid(
         '    Q["User Query"] --> ' + pre_node,
     ]
     if config.enable_dense_sparse:
+        since_lbl = _clean_mermaid_label(str(config.min_year) if config.min_year is not None else "any", 12)
         sql_note = (
-            f" + SQL Filter ({_clean_mermaid_label(config.department or 'all', 18)}, since {config.min_year or 'any'})"
+            f" + SQL Filter ({_clean_mermaid_label(config.department or 'all', 18)}, since {since_lbl})"
             if (config.department and config.department != "all") or config.min_year is not None
             else ""
         )
@@ -1040,4 +1088,3 @@ def build_modular_rag_mermaid(
 
     lines.append('    Rerank --> LLM["Grounded LLM Synthesis (Llama.app)"]')
     return "\n".join(lines)
-
