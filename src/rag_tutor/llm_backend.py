@@ -9,10 +9,22 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
+from .scratch_rag import vector_norm
+
 DEFAULT_LLAMA_MACOS_URL = "http://localhost:9931"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_MAX_RESPONSE_BYTES = 1_048_576
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
 
 STOPWORDS: frozenset[str] = frozenset({
     "the", "a", "an", "is", "are", "was", "were", "in", "on", "at",
@@ -231,7 +243,7 @@ class LocalEmbeddingEngine:
         for tok in tokens:
             if tok in STOPWORDS:
                 continue
-            digest = hashlib.md5(tok.encode("utf-8")).digest()
+            digest = hashlib.md5(tok.encode("utf-8"), usedforsecurity=False).digest()
             slot1 = lex_start + (int.from_bytes(digest[0:2], "little") % lex_span)
             sign1 = 1.0 if (digest[2] & 1) == 0 else -1.0
             slot2 = lex_start + (int.from_bytes(digest[4:6], "little") % lex_span)
@@ -246,11 +258,12 @@ class LocalEmbeddingEngine:
         for i in range(max(0, len(compact) - 2)):
             trigram = compact[i : i + 3]
             h = int.from_bytes(
-                hashlib.md5(trigram.encode("utf-8")).digest()[:2], "little"
+                hashlib.md5(trigram.encode("utf-8"), usedforsecurity=False).digest()[:2],
+                "little",
             )
             vec[ngram_start + (h % ngram_span)] += 0.25
 
-        norm = math.sqrt(sum(x * x for x in vec))
+        norm = vector_norm(vec)
         if norm > 0.0:
             vec = [round(x / norm, 6) for x in vec]
         return vec
@@ -258,17 +271,15 @@ class LocalEmbeddingEngine:
 
 @dataclass
 class LlamaModelInfo:
-    """Metadata about a model discovered from Llama.app (`GET /v1/models`)."""
+    """Model metadata returned by `GET /v1/models`."""
 
     id: str
     status: str = "unknown"
-    supports_vision: bool = False
-    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class LLMGenerationResult:
-    """Result from calling Llama.app or the built-in educational fallback."""
+    """Result from Llama.app or the offline fallback synthesizer."""
 
     content: str
     model: str
@@ -278,7 +289,7 @@ class LLMGenerationResult:
 
 
 class LlamaMacOSClient:
-    """Client for the ggml-org/Llama-macOS local server (`http://localhost:9931`)."""
+    """Client for the local ggml-org/Llama-macOS server."""
 
     def __init__(
         self,
@@ -287,37 +298,54 @@ class LlamaMacOSClient:
     ) -> None:
         cleaned_url = base_url.rstrip("/")
         parsed = urllib.parse.urlparse(cleaned_url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(f"Invalid HTTP(S) base_url: {base_url!r}")
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.netloc
+            or parsed.hostname not in _LOOPBACK_HOSTS
+            or any((parsed.username, parsed.password, parsed.params, parsed.query, parsed.fragment))
+        ):
+            raise ValueError(f"Invalid loopback HTTP(S) base_url: {base_url!r}")
         self.base_url = cleaned_url
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = max(0.5, float(timeout_seconds))
+
+    def _request_json(
+        self,
+        path: str,
+        timeout: float,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"Content-Type": "application/json"} if payload is not None else {}
+        req = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=data,
+            headers=headers,
+            method="POST" if payload is not None else "GET",
+        )
+        with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as resp:
+            raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+        if len(raw) > _MAX_RESPONSE_BYTES:
+            raise ValueError("Response exceeded 1 MiB safety limit.")
+        return json.loads(raw.decode("utf-8"))
 
     def check_health(self) -> tuple[bool, list[LlamaModelInfo], str]:
-        """Query `GET /v1/models` to check if Llama.app is running and list models."""
-        req = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
+        """Query `GET /v1/models` to verify Llama.app availability."""
         try:
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-                models: list[LlamaModelInfo] = []
-                for item in payload.get("data", []):
-                    model_id = str(item.get("id", ""))
-                    status_obj = item.get("status") or {}
-                    args = status_obj.get("args") or []
-                    if model_id:
-                        models.append(
-                            LlamaModelInfo(
-                                id=model_id,
-                                status=str(status_obj.get("value", "ready")),
-                                supports_vision=isinstance(args, list) and "--mmproj" in args,
-                                raw=item,
-                            )
-                        )
-                models.sort(key=lambda m: m.id)
-                return (
-                    True,
-                    models,
-                    f"Connected to Llama.app at {self.base_url} ({len(models)} model(s) found)",
+            payload = self._request_json("/v1/models", timeout=2.5)
+            models = [
+                LlamaModelInfo(
+                    id=model_id,
+                    status=str((item.get("status") or {}).get("value", "ready")),
                 )
+                for item in payload.get("data", [])
+                if (model_id := str(item.get("id", "")))
+            ]
+            models.sort(key=lambda m: m.id)
+            return (
+                True,
+                models,
+                f"Connected to Llama.app at {self.base_url} ({len(models)} model(s) found)",
+            )
         except Exception as exc:
             return (
                 False,
@@ -352,35 +380,29 @@ class LlamaMacOSClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
+                    "temperature": max(0.0, float(temperature)),
+                    "max_tokens": max(1, int(max_tokens)),
                     "stream": False,
                 }
                 if not enable_thinking:
                     body["reasoning_effort"] = "none"
                     body["chat_template_kwargs"] = {"enable_thinking": False}
-
-                req = urllib.request.Request(
-                    f"{self.base_url}/v1/chat/completions",
-                    data=json.dumps(body).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
                 try:
-                    with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                        resp_json = json.loads(resp.read().decode("utf-8"))
-                        choices = resp_json.get("choices") or []
-                        if choices:
-                            msg = choices[0].get("message") or {}
-                            content = str(msg.get("content") or "").strip()
-                            elapsed = (time.perf_counter() - t0) * 1000.0
-                            return LLMGenerationResult(
-                                content=content,
-                                model=selected_model,
-                                backend="llama-macos",
-                                latency_ms=round(elapsed, 1),
-                                thinking_enabled=enable_thinking,
-                            )
+                    resp_json = self._request_json(
+                        "/v1/chat/completions",
+                        timeout=self.timeout_seconds,
+                        payload=body,
+                    )
+                    choices = resp_json.get("choices") or []
+                    if choices:
+                        content = str((choices[0].get("message") or {}).get("content") or "").strip()
+                        return LLMGenerationResult(
+                            content=content,
+                            model=selected_model,
+                            backend="llama-macos",
+                            latency_ms=round((time.perf_counter() - t0) * 1000.0, 1),
+                            thinking_enabled=enable_thinking,
+                        )
                 except Exception:
                     pass
 
@@ -389,12 +411,11 @@ class LlamaMacOSClient:
             user_prompt=user_prompt,
             retrieved_context=retrieved_context,
         )
-        elapsed = (time.perf_counter() - t0) * 1000.0
         return LLMGenerationResult(
             content=fallback_text,
             model="educational-fallback (local deterministic synthesizer)",
             backend="educational-fallback",
-            latency_ms=round(elapsed, 1),
+            latency_ms=round((time.perf_counter() - t0) * 1000.0, 1),
             thinking_enabled=False,
         )
 

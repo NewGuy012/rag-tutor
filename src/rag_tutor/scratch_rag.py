@@ -50,7 +50,7 @@ class SimpleVectorDB:
         for chunk in chunks:
             cleaned = chunk.strip()
             if cleaned:
-                self.add_chunk(cleaned, embed_fn(cleaned))
+                self.entries.append((cleaned, embed_fn(cleaned)))
         return len(self.entries)
 
     def retrieve(
