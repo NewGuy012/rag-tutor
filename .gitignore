@@ -8,8 +8,9 @@ venv/
 dist/
 build/
 
-# Marimo
-__marimo__/
+# Marimo (keep session snapshots for molab previews)
+__marimo__/*
+!__marimo__/session/
 .marimo/
 
 # DuckDB temporary files
