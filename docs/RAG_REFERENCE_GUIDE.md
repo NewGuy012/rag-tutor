@@ -84,6 +84,7 @@ As demonstrated in Xuan-Son Nguyen's Hugging Face guide ([*Code a simple RAG fro
 ```python
 import math
 
+
 # 1. Pure-Python Cosine Similarity
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     dot_product = sum(x * y for x, y in zip(a, b))
@@ -93,19 +94,19 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
         return 0.0
     return dot_product / (norm_a * norm_b)
 
+
 # 2. In-Memory Vector Database: list of (chunk_text, embedding_vector)
 VECTOR_DB: list[tuple[str, list[float]]] = []
+
 
 def add_chunk_to_database(chunk: str, embed_fn) -> None:
     VECTOR_DB.append((chunk, embed_fn(chunk)))
 
+
 # 3. Retrieve Top-N Most Similar Chunks
 def retrieve(query: str, embed_fn, top_n: int = 3) -> list[tuple[str, float]]:
     query_vec = embed_fn(query)
-    scores = [
-        (chunk, cosine_similarity(query_vec, vec))
-        for chunk, vec in VECTOR_DB
-    ]
+    scores = [(chunk, cosine_similarity(query_vec, vec)) for chunk, vec in VECTOR_DB]
     scores.sort(key=lambda pair: pair[1], reverse=True)
     return scores[:top_n]
 ```

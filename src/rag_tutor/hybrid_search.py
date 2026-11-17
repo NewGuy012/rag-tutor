@@ -59,7 +59,9 @@ class HybridSearchEngine:
     ) -> list[HybridSearchResult]:
         """Execute Hybrid Search with RRF (`rrf`) or Normalized Convex Combination (`convex`)."""
         if fusion_method not in ("rrf", "convex"):
-            raise ValueError(f"Unsupported fusion_method {fusion_method!r}; expected 'rrf' or 'convex'.")
+            raise ValueError(
+                f"Unsupported fusion_method {fusion_method!r}; expected 'rrf' or 'convex'."
+            )
         if query_vec is None and not query.strip():
             return []
 
@@ -84,17 +86,27 @@ class HybridSearchEngine:
         )
 
         pool_size = len(vec_results)
-        vec_map = {rec.chunk_id: (rank_idx + 1, rec.score, rec) for rank_idx, rec in enumerate(vec_results)}
-        bm25_map = {rec.chunk_id: (rank_idx + 1, rec.score) for rank_idx, rec in enumerate(bm25_results)}
+        vec_map = {
+            rec.chunk_id: (rank_idx + 1, rec.score, rec)
+            for rank_idx, rec in enumerate(vec_results)
+        }
+        bm25_map = {
+            rec.chunk_id: (rank_idx + 1, rec.score)
+            for rank_idx, rec in enumerate(bm25_results)
+        }
 
         norm_vec = _min_max_normalize({cid: v[1] for cid, v in vec_map.items()})
-        norm_bm25 = _min_max_normalize({cid: bm25_map.get(cid, (pool_size, 0.0))[1] for cid in vec_map})
+        norm_bm25 = _min_max_normalize(
+            {cid: bm25_map.get(cid, (pool_size, 0.0))[1] for cid in vec_map}
+        )
 
         fused: list[HybridSearchResult] = []
         for cid, (v_rank, v_score, rec) in vec_map.items():
             b_rank, b_score = bm25_map.get(cid, (pool_size, 0.0))
             effective_b_rank = b_rank if b_score > 0.0 else pool_size + 50
-            rrf_val = (alpha / (rrf_k + v_rank)) + ((1.0 - alpha) / (rrf_k + effective_b_rank))
+            rrf_val = (alpha / (rrf_k + v_rank)) + (
+                (1.0 - alpha) / (rrf_k + effective_b_rank)
+            )
             nv = norm_vec.get(cid, 0.0)
             nb = norm_bm25.get(cid, 0.0)
             convex_val = (alpha * nv) + ((1.0 - alpha) * nb)
@@ -122,7 +134,10 @@ class HybridSearchEngine:
             )
 
         fused.sort(
-            key=lambda item: (item.fusion_score, item.vector_score * alpha + item.bm25_score * (1.0 - alpha)),
+            key=lambda item: (
+                item.fusion_score,
+                item.vector_score * alpha + item.bm25_score * (1.0 - alpha),
+            ),
             reverse=True,
         )
         top_results = fused[:top_k]

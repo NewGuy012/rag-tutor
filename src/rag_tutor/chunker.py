@@ -96,7 +96,9 @@ def chunk_fixed_character(
                     text=snippet,
                     start_char=c_start,
                     end_char=c_end,
-                    overlap_chars=max(0, chunks[-1].end_char - c_start) if chunks else 0,
+                    overlap_chars=max(0, chunks[-1].end_char - c_start)
+                    if chunks
+                    else 0,
                     department=department,
                     updated_year=updated_year,
                 )
@@ -152,7 +154,9 @@ def chunk_markdown_sections(
             )
         else:
             for idx, sc in enumerate(
-                chunk_fixed_character(sec_text, max_chunk_size, chunk_overlap, doc_source)
+                chunk_fixed_character(
+                    sec_text, max_chunk_size, chunk_overlap, doc_source
+                )
             ):
                 sc.chunk_id = len(chunks) + 1
                 sc.section_title = f"{sec_title} (Part {idx + 1})"
@@ -173,13 +177,21 @@ def chunk_document(
     """Dispatch document chunking by strategy (`'markdown'` or `'fixed'`)."""
     if strategy == "fixed":
         return chunk_fixed_character(
-            text, chunk_size=chunk_size, chunk_overlap=chunk_overlap, doc_source=doc_source
+            text,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            doc_source=doc_source,
         )
     if strategy == "markdown":
         return chunk_markdown_sections(
-            text, max_chunk_size=chunk_size, chunk_overlap=chunk_overlap, doc_source=doc_source
+            text,
+            max_chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            doc_source=doc_source,
         )
-    raise ValueError(f"Unsupported chunking strategy {strategy!r}; expected 'markdown' or 'fixed'.")
+    raise ValueError(
+        f"Unsupported chunking strategy {strategy!r}; expected 'markdown' or 'fixed'."
+    )
 
 
 def load_sample_markdown_corpus(

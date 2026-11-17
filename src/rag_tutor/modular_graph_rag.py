@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
 from .chunker import Chunk
 from .duckdb_store import DuckDBVectorStore
 from .hybrid_search import HybridSearchEngine, HybridSearchResult
-from .llm_backend import LlamaMacOSClient, get_default_client, get_default_embedder, tokenize
+from .llm_backend import (
+    LlamaMacOSClient,
+    get_default_client,
+    get_default_embedder,
+    tokenize,
+)
 from .reranker import CrossEncoderReranker
 from .scratch_rag import build_rag_prompt
 
@@ -22,25 +28,115 @@ _EXPLICIT_TRIPLE_RE = re.compile(
 )
 
 _CANONICAL_TRIPLES: list[tuple[str, str, str, tuple[str, ...]]] = [
-    ("DuckDB", "stores_vectors_as", "FLOAT[128] Arrays", ("duckdb", "float", "embedding", "table")),
-    ("DuckDB", "computes_similarity_via", "array_cosine_similarity", ("duckdb", "array_cosine_similarity")),
-    ("DuckDB", "supports_sparse_search", "Okapi BM25 (BM25-K1-1.2)", ("duckdb", "fts", "bm25", "bm25-k1-1.2")),
+    (
+        "DuckDB",
+        "stores_vectors_as",
+        "FLOAT[128] Arrays",
+        ("duckdb", "float", "embedding", "table"),
+    ),
+    (
+        "DuckDB",
+        "computes_similarity_via",
+        "array_cosine_similarity",
+        ("duckdb", "array_cosine_similarity"),
+    ),
+    (
+        "DuckDB",
+        "supports_sparse_search",
+        "Okapi BM25 (BM25-K1-1.2)",
+        ("duckdb", "fts", "bm25", "bm25-k1-1.2"),
+    ),
     ("DuckDB", "scales_ann_via", "HNSW (vss extension)", ("duckdb", "vss", "hnsw")),
-    ("ERR-VEC-768", "caused_by", "Embedding Dimension Mismatch", ("err-vec-768", "dimension", "mismatch")),
-    ("ERR-CHUNK-004", "caused_by", "Zero Vector Norm (<15 chars)", ("err-chunk-004", "zero", "norm")),
-    ("Hybrid Search", "combines", "Dense Vectors + Sparse BM25", ("hybrid", "bm25", "vector")),
-    ("RRF-K60", "merges_ranks_via", "Reciprocal Rank Fusion", ("rrf", "rrf-k60", "reciprocal")),
-    ("CONVEX-ALPHA-70", "blends_scores_via", "Min-Max Normalized Linear Sum", ("convex", "linear", "alpha")),
-    ("Cross-Encoder", "refines", "Top-50 Candidates -> Top-5", ("cross-encoder", "rerank", "top-50", "cohere")),
-    ("STAGE2-RERANK-15to3", "prevents", "Lost in the Middle", ("stage2-rerank-15to3", "lost", "middle")),
-    ("HyDE", "generates", "Hypothetical Answer Embedding", ("hyde", "hypothetical", "answer")),
-    ("Multi-Query", "rewrites_into", "3-4 Query Variations", ("multi-query", "variations", "expansion")),
-    ("GraphRAG", "traverses", "Knowledge Graph Triples", ("graphrag", "graph", "triples")),
-    ("Qdrant", "supports_natively", "Dense + Sparse SPLADE + RRF", ("qdrant", "splade", "rrf")),
-    ("Weaviate", "supports_natively", "HNSW + BM25F + Convex/RRF", ("weaviate", "bm25f", "relativescorefusion")),
-    ("Pinecone", "supports_natively", "Hybrid Indexes + Rerankers", ("pinecone", "hybrid", "rerankers")),
-    ("PROTO-RAG-101", "illustrates", "Ungrounded LLM Hallucination", ("proto-rag-101", "hallucination")),
-    ("Lewis et al. (2020)", "introduced", "Retrieval-Augmented Generation", ("lewis", "2020", "rag")),
+    (
+        "ERR-VEC-768",
+        "caused_by",
+        "Embedding Dimension Mismatch",
+        ("err-vec-768", "dimension", "mismatch"),
+    ),
+    (
+        "ERR-CHUNK-004",
+        "caused_by",
+        "Zero Vector Norm (<15 chars)",
+        ("err-chunk-004", "zero", "norm"),
+    ),
+    (
+        "Hybrid Search",
+        "combines",
+        "Dense Vectors + Sparse BM25",
+        ("hybrid", "bm25", "vector"),
+    ),
+    (
+        "RRF-K60",
+        "merges_ranks_via",
+        "Reciprocal Rank Fusion",
+        ("rrf", "rrf-k60", "reciprocal"),
+    ),
+    (
+        "CONVEX-ALPHA-70",
+        "blends_scores_via",
+        "Min-Max Normalized Linear Sum",
+        ("convex", "linear", "alpha"),
+    ),
+    (
+        "Cross-Encoder",
+        "refines",
+        "Top-50 Candidates -> Top-5",
+        ("cross-encoder", "rerank", "top-50", "cohere"),
+    ),
+    (
+        "STAGE2-RERANK-15to3",
+        "prevents",
+        "Lost in the Middle",
+        ("stage2-rerank-15to3", "lost", "middle"),
+    ),
+    (
+        "HyDE",
+        "generates",
+        "Hypothetical Answer Embedding",
+        ("hyde", "hypothetical", "answer"),
+    ),
+    (
+        "Multi-Query",
+        "rewrites_into",
+        "3-4 Query Variations",
+        ("multi-query", "variations", "expansion"),
+    ),
+    (
+        "GraphRAG",
+        "traverses",
+        "Knowledge Graph Triples",
+        ("graphrag", "graph", "triples"),
+    ),
+    (
+        "Qdrant",
+        "supports_natively",
+        "Dense + Sparse SPLADE + RRF",
+        ("qdrant", "splade", "rrf"),
+    ),
+    (
+        "Weaviate",
+        "supports_natively",
+        "HNSW + BM25F + Convex/RRF",
+        ("weaviate", "bm25f", "relativescorefusion"),
+    ),
+    (
+        "Pinecone",
+        "supports_natively",
+        "Hybrid Indexes + Rerankers",
+        ("pinecone", "hybrid", "rerankers"),
+    ),
+    (
+        "PROTO-RAG-101",
+        "illustrates",
+        "Ungrounded LLM Hallucination",
+        ("proto-rag-101", "hallucination"),
+    ),
+    (
+        "Lewis et al. (2020)",
+        "introduced",
+        "Retrieval-Augmented Generation",
+        ("lewis", "2020", "rag"),
+    ),
 ]
 
 
@@ -126,7 +222,9 @@ class KnowledgeGraphStore:
         self._build_from_chunks(chunks)
 
     @staticmethod
-    def _find_best_chunk(chunks: list[Chunk], keywords: tuple[str, ...]) -> Chunk | None:
+    def _find_best_chunk(
+        chunks: list[Chunk], keywords: tuple[str, ...]
+    ) -> Chunk | None:
         kw_set = {k.lower() for k in keywords}
         best_chunk: Chunk | None = None
         best_hits = 0
@@ -138,7 +236,9 @@ class KnowledgeGraphStore:
                 best_chunk = ch
         return best_chunk
 
-    def _add_triple(self, triple: KnowledgeTriple, seen: set[tuple[str, str, str]]) -> None:
+    def _add_triple(
+        self, triple: KnowledgeTriple, seen: set[tuple[str, str, str]]
+    ) -> None:
         key = (triple.subject.lower(), triple.predicate.lower(), triple.obj.lower())
         if key in seen:
             return
@@ -189,7 +289,9 @@ class KnowledgeGraphStore:
         for entity in self._adj:
             e_lower = entity.lower()
             e_tokens = set(tokenize(entity, stem=True, drop_stopwords=True))
-            score = (2.5 if len(e_lower) >= 3 and e_lower in q_lower else 0.0) + len(q_tokens & e_tokens)
+            score = (2.5 if len(e_lower) >= 3 and e_lower in q_lower else 0.0) + len(
+                q_tokens & e_tokens
+            )
             if score > 0.0:
                 entity_scores.append((score, entity))
 
@@ -214,7 +316,9 @@ class KnowledgeGraphStore:
                 if t_key not in seen_triples:
                     seen_triples.add(t_key)
                     matched_triples.append((triple, next_hop))
-                    raw_chunk_scores[triple.source_chunk_id] += 1.0 if next_hop == 1 else 0.45
+                    raw_chunk_scores[triple.source_chunk_id] += (
+                        1.0 if next_hop == 1 else 0.45
+                    )
                 if neighbor not in visited_entities:
                     visited_entities[neighbor] = next_hop
                     queue.append((neighbor, next_hop))
@@ -224,7 +328,9 @@ class KnowledgeGraphStore:
 
         peak = max(raw_chunk_scores.values(), default=0.0)
         norm_chunk_scores = (
-            {cid: round(sc / peak, 4) for cid, sc in raw_chunk_scores.items()} if peak > 0.0 else {}
+            {cid: round(sc / peak, 4) for cid, sc in raw_chunk_scores.items()}
+            if peak > 0.0
+            else {}
         )
         return GraphSearchResult(seed_entities, matched_triples, norm_chunk_scores)
 
@@ -269,7 +375,9 @@ class QueryExpander:
         )
         return res.content.strip() if res.backend == "llama-macos" else None
 
-    def _expand_multi_query(self, query: str, model: str | None = None) -> QueryExpansionResult:
+    def _expand_multi_query(
+        self, query: str, model: str | None = None
+    ) -> QueryExpansionResult:
         content = self._generate_if_online(
             "Rewrite the user question into 3 concise search query variations covering "
             "different synonyms and exact technical terms. Return one query per line.",
@@ -285,7 +393,9 @@ class QueryExpander:
                     variations.append(item)
 
         if not variations:
-            key_terms = " ".join(tokenize(query, stem=False, drop_stopwords=True)[:6]) or query
+            key_terms = (
+                " ".join(tokenize(query, stem=False, drop_stopwords=True)[:6]) or query
+            )
             variations = [
                 f"{key_terms} architecture workflow and pipeline stages",
                 f"exact technical terms and configuration for {key_terms}",
@@ -297,7 +407,9 @@ class QueryExpander:
             expanded_queries=list(dict.fromkeys([query, *variations]))[:4],
         )
 
-    def _expand_hyde(self, query: str, model: str | None = None) -> QueryExpansionResult:
+    def _expand_hyde(
+        self, query: str, model: str | None = None
+    ) -> QueryExpansionResult:
         content = self._generate_if_online(
             "Write a concise, factual 2-sentence technical passage that directly answers "
             "the user's question as if excerpted from an engineering reference manual.",
@@ -316,7 +428,9 @@ class QueryExpander:
                 "Cross-Encoder reranker refines the final top chunks for grounded LLM synthesis."
             )
 
-        return QueryExpansionResult(mode="hyde", expanded_queries=[query], hypothetical_doc=content)
+        return QueryExpansionResult(
+            mode="hyde", expanded_queries=[query], hypothetical_doc=content
+        )
 
 
 def _make_candidate(
@@ -362,11 +476,11 @@ class ModularRAGPipeline:
 
     @staticmethod
     def _chunk_passes_filters(chunk: Chunk, config: ModularRAGConfig) -> bool:
-        if config.department and config.department != "all" and chunk.department != config.department:
-            return False
-        if config.min_year is not None and chunk.updated_year < int(config.min_year):
-            return False
-        return True
+        return (
+            not config.department
+            or config.department == "all"
+            or chunk.department == config.department
+        ) and (config.min_year is None or chunk.updated_year >= int(config.min_year))
 
     def run(
         self,
@@ -388,7 +502,9 @@ class ModularRAGPipeline:
                 latency_ms=0.0,
             )
 
-        expansion = self.expander.expand(cleaned_query, mode=cfg.expansion_mode, model=model)
+        expansion = self.expander.expand(
+            cleaned_query, mode=cfg.expansion_mode, model=model
+        )
         hyde_vec = (
             self.embed_fn(expansion.hypothetical_doc)
             if expansion.mode == "hyde" and expansion.hypothetical_doc
@@ -402,9 +518,18 @@ class ModularRAGPipeline:
 
         if cfg.enable_dense_sparse:
             base_sources = [
-                *(["HyDE-Dense" if hyde_vec is not None else "Dense"] if cfg.alpha > 0.0 else []),
+                *(
+                    ["HyDE-Dense" if hyde_vec is not None else "Dense"]
+                    if cfg.alpha > 0.0
+                    else []
+                ),
                 *(["BM25"] if cfg.alpha < 1.0 else []),
-                *(["SQL-Filter"] if (cfg.department and cfg.department != "all") or cfg.min_year is not None else []),
+                *(
+                    ["SQL-Filter"]
+                    if (cfg.department and cfg.department != "all")
+                    or cfg.min_year is not None
+                    else []
+                ),
                 *(["Multi-Query"] if is_multi else []),
             ]
             for q_idx, q_variant in enumerate(queries):
@@ -442,7 +567,9 @@ class ModularRAGPipeline:
         )
 
         if cfg.enable_graph and graph_result.chunk_scores:
-            peak_base = max((c.base_fusion_score for c in candidates_by_id.values()), default=0.0)
+            peak_base = max(
+                (c.base_fusion_score for c in candidates_by_id.values()), default=0.0
+            )
             bonus_scale = peak_base if peak_base > 0.0 else 1.0
             for cid, g_score in graph_result.chunk_scores.items():
                 ch = self.chunks_by_id.get(cid)
@@ -451,7 +578,9 @@ class ModularRAGPipeline:
                 bonus = round(cfg.graph_weight * g_score * bonus_scale, 6)
                 cand = candidates_by_id.get(cid)
                 if cand is None:
-                    candidates_by_id[cid] = _make_candidate(ch, 0.0, bonus, ["Knowledge-Graph"])
+                    candidates_by_id[cid] = _make_candidate(
+                        ch, 0.0, bonus, ["Knowledge-Graph"]
+                    )
                 else:
                     cand.combined_score = round(cand.base_fusion_score + bonus, 6)
                     if "Knowledge-Graph" not in cand.sources:

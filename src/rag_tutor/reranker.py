@@ -43,12 +43,17 @@ class CrossEncoderReranker:
         coverage = len(q_set & c_set) / len(q_set)
 
         best_sent_coverage = max(
-            len(q_set & set(tokenize(sent, stem=False, drop_stopwords=True))) / len(q_set)
+            len(q_set & set(tokenize(sent, stem=False, drop_stopwords=True)))
+            / len(q_set)
             for sent in sentences
         )
 
-        q_bigrams = {f"{q_tokens[i]} {q_tokens[i + 1]}" for i in range(len(q_tokens) - 1)}
-        c_bigrams = {f"{c_tokens[i]} {c_tokens[i + 1]}" for i in range(len(c_tokens) - 1)}
+        q_bigrams = {
+            f"{q_tokens[i]} {q_tokens[i + 1]}" for i in range(len(q_tokens) - 1)
+        }
+        c_bigrams = {
+            f"{c_tokens[i]} {c_tokens[i + 1]}" for i in range(len(c_tokens) - 1)
+        }
         bigram_hits = len(q_bigrams & c_bigrams)
         bigram_bonus = min(0.25, bigram_hits * 0.12)
 
@@ -62,21 +67,30 @@ class CrossEncoderReranker:
         if bigram_hits > 0:
             reasons.append(f"{bigram_hits} exact phrase bigram(s)")
 
-        if any(w in q_lower for w in ("how many", "how fast", "speed", "hours", "weight", "record")):
-            if re.search(r"\b\d+(?:\.\d+)?\b", chunk_text):
-                intent_bonus += 0.14
-                reasons.append("numeric answer alignment")
+        if any(
+            w in q_lower
+            for w in ("how many", "how fast", "speed", "hours", "weight", "record")
+        ) and re.search(r"\b\d+(?:\.\d+)?\b", chunk_text):
+            intent_bonus += 0.14
+            reasons.append("numeric answer alignment")
 
-        if any(w in q_lower for w in ("code", "error", "diagnostic", "pattern", "stage")):
-            if re.search(r"\b[A-Z0-9]+-[A-Z0-9-]+\b", chunk_text):
-                intent_bonus += 0.16
-                reasons.append("exact technical identifier match")
+        if any(
+            w in q_lower for w in ("code", "error", "diagnostic", "pattern", "stage")
+        ) and re.search(r"\b[A-Z0-9]+-[A-Z0-9-]+\b", chunk_text):
+            intent_bonus += 0.16
+            reasons.append("exact technical identifier match")
 
         distractor_penalty = 0.0
-        if "distractor example" in c_lower or "early 2018 search prototypes" in c_lower:
-            if "lost in the middle" not in q_lower and "2018" not in q_lower:
-                distractor_penalty = 0.28
-                reasons.append("distractor context penalty (-0.28)")
+        if (
+            (
+                "distractor example" in c_lower
+                or "early 2018 search prototypes" in c_lower
+            )
+            and "lost in the middle" not in q_lower
+            and "2018" not in q_lower
+        ):
+            distractor_penalty = 0.28
+            reasons.append("distractor context penalty (-0.28)")
 
         raw_logit = (
             -1.4

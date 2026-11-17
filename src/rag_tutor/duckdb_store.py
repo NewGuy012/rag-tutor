@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Self
 
 import duckdb
 
@@ -44,7 +45,9 @@ class DuckDBVectorStore:
         self.db_path = db_path
         self.embedding_dim = int(embedding_dim)
         if not 1 <= self.embedding_dim <= 4096:
-            raise ValueError(f"Invalid embedding_dim {self.embedding_dim}; must be in 1..4096.")
+            raise ValueError(
+                f"Invalid embedding_dim {self.embedding_dim}; must be in 1..4096."
+            )
         self.embed_fn = embed_fn or get_default_embedder().embed
         self.conn = duckdb.connect(db_path)
         self._init_schema()
@@ -70,7 +73,7 @@ class DuckDBVectorStore:
     def close(self) -> None:
         self.conn.close()
 
-    def __enter__(self) -> DuckDBVectorStore:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -110,16 +113,18 @@ class DuckDBVectorStore:
             if len(cleaned) < MIN_CHUNK_CHARS:
                 continue
             vec = self._validate_vec(self.embed_fn(cleaned))
-            rows.append((
-                ch.chunk_id,
-                ch.doc_source,
-                ch.section_title,
-                cleaned,
-                len(cleaned),
-                ch.department,
-                int(ch.updated_year),
-                vec,
-            ))
+            rows.append(
+                (
+                    ch.chunk_id,
+                    ch.doc_source,
+                    ch.section_title,
+                    cleaned,
+                    len(cleaned),
+                    ch.department,
+                    int(ch.updated_year),
+                    vec,
+                )
+            )
 
         if rows:
             self.conn.executemany(
@@ -157,8 +162,18 @@ class DuckDBVectorStore:
 
     def list_metadata_values(self) -> dict[str, list[Any]]:
         """Return sorted distinct department and year metadata values."""
-        depts = [r[0] for r in self.conn.execute("SELECT DISTINCT department FROM rag_chunks ORDER BY 1;").fetchall()]
-        years = [int(r[0]) for r in self.conn.execute("SELECT DISTINCT updated_year FROM rag_chunks ORDER BY 1;").fetchall()]
+        depts = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT DISTINCT department FROM rag_chunks ORDER BY 1;"
+            ).fetchall()
+        ]
+        years = [
+            int(r[0])
+            for r in self.conn.execute(
+                "SELECT DISTINCT updated_year FROM rag_chunks ORDER BY 1;"
+            ).fetchall()
+        ]
         return {"departments": depts, "years": years}
 
     def build_filtered_vector_sql(
@@ -195,7 +210,9 @@ class DuckDBVectorStore:
         """Run exact cosine similarity search in DuckDB with optional SQL metadata filters."""
         if query_vec is None and not query.strip():
             return []
-        vec = self._validate_vec(query_vec if query_vec is not None else self.embed_fn(query))
+        vec = self._validate_vec(
+            query_vec if query_vec is not None else self.embed_fn(query)
+        )
         sql, filter_params = self.build_filtered_vector_sql(
             department=department,
             min_year=min_year,
@@ -206,7 +223,9 @@ class DuckDBVectorStore:
             exec_params.append(max(1, int(top_k)))
         rows = self.conn.execute(sql, exec_params).fetchall()
         return [
-            self._row_to_record(r, float(r[6]) if r[6] is not None and math.isfinite(r[6]) else 0.0)
+            self._row_to_record(
+                r, float(r[6]) if r[6] is not None and math.isfinite(r[6]) else 0.0
+            )
             for r in rows
         ]
 
@@ -264,7 +283,9 @@ class DuckDBVectorStore:
         scored.sort(key=lambda item: (item.score, -item.chunk_id), reverse=True)
         return scored[:limit] if limit is not None else scored
 
-    def run_custom_sql(self, sql_query: str, max_rows: int = 200) -> list[dict[str, Any]]:
+    def run_custom_sql(
+        self, sql_query: str, max_rows: int = 200
+    ) -> list[dict[str, Any]]:
         """Execute a validated read-only SQL query against `rag_chunks` using DuckDB's parser."""
         try:
             stmts = self.conn.extract_statements(sql_query)
@@ -274,9 +295,16 @@ class DuckDBVectorStore:
         if len(stmts) != 1:
             raise ValueError("Provide exactly one read-only SQL statement.")
         stmt = stmts[0]
-        if stmt.type != duckdb.StatementType.SELECT or _FORBIDDEN_SQL_RE.search(stmt.query):
-            raise ValueError("Only read-only SELECT/DESCRIBE/SUMMARIZE queries on rag_chunks are permitted.")
+        if stmt.type != duckdb.StatementType.SELECT or _FORBIDDEN_SQL_RE.search(
+            stmt.query
+        ):
+            raise ValueError(
+                "Only read-only SELECT/DESCRIBE/SUMMARIZE queries on rag_chunks are permitted."
+            )
 
-        rel = self.conn.execute(stmt)
+        try:
+            rel = self.conn.execute(stmt)
+        except duckdb.Error as exc:
+            raise ValueError(f"SQL execution error: {exc}") from exc
         cols = [desc[0] for desc in rel.description]
         return [dict(zip(cols, row)) for row in rel.fetchmany(max(1, int(max_rows)))]

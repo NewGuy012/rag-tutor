@@ -97,7 +97,9 @@ class AgenticRAGPipeline:
         collected_by_id: dict[int, RerankedCandidate],
         display_query: str | None = None,
     ) -> SubQueryStep | None:
-        s1_results = self.hybrid_engine.search(sub_query, top_k=stage1_candidates, alpha=alpha)
+        s1_results = self.hybrid_engine.search(
+            sub_query, top_k=stage1_candidates, alpha=alpha
+        )
         reranked = self.reranker.rerank(sub_query, s1_results, top_k=2)
         if not reranked:
             return None
@@ -145,9 +147,18 @@ class AgenticRAGPipeline:
         collected_by_id: dict[int, RerankedCandidate] = {}
 
         for idx, sq in enumerate(sub_queries):
-            reason = f"Sub-query #{idx + 1} from multi-hop planner" if is_multi_hop else "Primary direct lookup"
+            reason = (
+                f"Sub-query #{idx + 1} from multi-hop planner"
+                if is_multi_hop
+                else "Primary direct lookup"
+            )
             step = self._retrieve_step(
-                sq, reason, 0.5, stage1_candidates, len(retrieval_steps) + 1, collected_by_id
+                sq,
+                reason,
+                0.5,
+                stage1_candidates,
+                len(retrieval_steps) + 1,
+                collected_by_id,
             )
             if step is not None:
                 retrieval_steps.append(step)
@@ -168,9 +179,7 @@ class AgenticRAGPipeline:
                 retrieval_steps.append(retry_step)
                 max_score = max(max_score, retry_step.rerank_score)
             sufficiency_passed = max_score >= 0.45
-            sufficiency_note = (
-                "Triggered iterative BM25-weighted refinement lookup after low initial confidence."
-            )
+            sufficiency_note = "Triggered iterative BM25-weighted refinement lookup after low initial confidence."
         else:
             sufficiency_passed = True
             sufficiency_note = (
@@ -188,7 +197,9 @@ class AgenticRAGPipeline:
             f"[Chunk #{c.chunk_id} | {c.doc_source} > {c.section_title} | score={c.rerank_score:.3f}]\n{c.text}"
             for c in final_chunks
         ]
-        system_prompt, user_prompt = build_rag_prompt(cleaned_query, context_blocks, cite_chunks=True)
+        system_prompt, user_prompt = build_rag_prompt(
+            cleaned_query, context_blocks, cite_chunks=True
+        )
         gen_result = self.llm_client.generate(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -196,7 +207,9 @@ class AgenticRAGPipeline:
             enable_thinking=enable_thinking,
             retrieved_context=[c.text for c in final_chunks],
         )
-        verifications, faith_score = self.verify_response(gen_result.content, final_chunks)
+        verifications, faith_score = self.verify_response(
+            gen_result.content, final_chunks
+        )
 
         return AgenticTrace(
             original_query=cleaned_query,

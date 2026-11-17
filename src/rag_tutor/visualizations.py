@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import math
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 from .agentic_rag import AgenticTrace
 from .chunker import Chunk, extract_markdown_headings
@@ -70,14 +70,23 @@ def _svg_frame(width: int, height: int, inner: str, responsive: bool = True) -> 
 
 
 def _metric_row(
-    left_html: str, right_html: str, pct: float, fill: str, *,
-    bar_h: int = 8, marker_pct: float | None = None, marker_color: str = "#fbbf24",
-    marker_title: str = "", boxed: bool = False, sub_html: str = "",
+    left_html: str,
+    right_html: str,
+    pct: float,
+    fill: str,
+    *,
+    bar_h: int = 8,
+    marker_pct: float | None = None,
+    marker_color: str = "#fbbf24",
+    marker_title: str = "",
+    boxed: bool = False,
+    sub_html: str = "",
 ) -> str:
     title_attr = f' title="{_esc(marker_title)}"' if marker_title else ""
     marker = (
         f'<div style="position:absolute;left:{marker_pct:.1f}%;top:0;bottom:0;width:1.5px;background:{marker_color};"{title_attr}></div>'
-        if marker_pct is not None else ""
+        if marker_pct is not None
+        else ""
     )
     bar = (
         f'<div style="background:#1e293b;height:{bar_h}px;border-radius:4px;position:relative;overflow:hidden;">'
@@ -85,7 +94,7 @@ def _metric_row(
     )
     inner = (
         f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:4px;flex-wrap:wrap;">'
-        f'{left_html}{right_html}</div>{bar}{sub_html}'
+        f"{left_html}{right_html}</div>{bar}{sub_html}"
     )
     if boxed:
         return f'<div style="background:#020617;padding:8px 12px;border-radius:8px;border:1px solid #1e293b;margin-bottom:8px;">{inner}</div>'
@@ -172,7 +181,10 @@ def render_2d_compass_svg(
         diff = (ang_b - ang_a + math.pi) % (2 * math.pi) - math.pi
         sweep = 1 if diff >= 0 else 0
         mid_ang = ang_a + diff / 2.0
-        lx, ly = cx + (arc_r + 16) * math.cos(mid_ang), cy + (arc_r + 16) * math.sin(mid_ang)
+        lx, ly = (
+            cx + (arc_r + 16) * math.cos(mid_ang),
+            cy + (arc_r + 16) * math.sin(mid_ang),
+        )
         arc_svg = (
             f'<path d="M {sx:.1f} {sy:.1f} A {arc_r:.1f} {arc_r:.1f} 0 0 {sweep} {ex:.1f} {ey:.1f}" '
             f'fill="none" stroke="#a855f7" stroke-width="2.2" />'
@@ -187,7 +199,10 @@ def render_2d_compass_svg(
     euc_pct = max(0.0, min(100.0, euclid_sim * 100.0))
 
     if cos_val >= 0.75:
-        verdict, verdict_color = "🟢 High Semantic Alignment (Same Direction)", "#2dd4bf"
+        verdict, verdict_color = (
+            "🟢 High Semantic Alignment (Same Direction)",
+            "#2dd4bf",
+        )
     elif cos_val >= 0.25:
         verdict, verdict_color = "🟡 Moderate Similarity (Acute Angle)", "#fbbf24"
     elif cos_val >= -0.25:
@@ -195,18 +210,50 @@ def render_2d_compass_svg(
     else:
         verdict, verdict_color = "🔴 Opposite Semantic Direction (< 0)", "#f87171"
 
-    def _gauge(title_html: str, val_html: str, val_color: str, pct: float, bar_bg: str, mid_tick: bool = False) -> str:
+    def _gauge(
+        title_html: str,
+        val_html: str,
+        val_color: str,
+        pct: float,
+        bar_bg: str,
+        mid_tick: bool = False,
+    ) -> str:
         return _metric_row(
             f'<span style="color:#cbd5e1;">{title_html}</span>',
             f'<span style="font-family:monospace;color:{val_color};font-weight:700;">{val_html}</span>',
-            pct, bar_bg, bar_h=10, marker_pct=50.0 if mid_tick else None, marker_color="#475569",
+            pct,
+            bar_bg,
+            bar_h=10,
+            marker_pct=50.0 if mid_tick else None,
+            marker_color="#475569",
         )
 
-    gauges = "".join([
-        _gauge("<strong>Cosine Similarity</strong> (Angle-only, scale-invariant)", f"{cos_val:+.4f} (θ = {angle_deg:.1f}°)", "#2dd4bf", cos_pct, "linear-gradient(90deg,#f43f5e,#eab308,#2dd4bf)", True),
-        _gauge("<strong>Raw Dot Product (A · B)</strong> (Sensitive to vector length)", f"{dot_val:+.4f}", "#f59e0b", dot_pct, "#f59e0b"),
-        _gauge("<strong>Euclidean Distance ‖A − B‖</strong> (Tip-to-tip distance)", f"dist = {euclid_dist:.3f} (sim = {euclid_sim:.3f})", "#c084fc", euc_pct, "#c084fc"),
-    ])
+    gauges = "".join(
+        [
+            _gauge(
+                "<strong>Cosine Similarity</strong> (Angle-only, scale-invariant)",
+                f"{cos_val:+.4f} (θ = {angle_deg:.1f}°)",
+                "#2dd4bf",
+                cos_pct,
+                "linear-gradient(90deg,#f43f5e,#eab308,#2dd4bf)",
+                True,
+            ),
+            _gauge(
+                "<strong>Raw Dot Product (A · B)</strong> (Sensitive to vector length)",
+                f"{dot_val:+.4f}",
+                "#f59e0b",
+                dot_pct,
+                "#f59e0b",
+            ),
+            _gauge(
+                "<strong>Euclidean Distance ‖A − B‖</strong> (Tip-to-tip distance)",
+                f"dist = {euclid_dist:.3f} (sim = {euclid_sim:.3f})",
+                "#c084fc",
+                euc_pct,
+                "#c084fc",
+            ),
+        ]
+    )
 
     return f"""
     <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;background:#0f172a;padding:14px;border-radius:12px;border:1px solid #334155;color:#f8fafc;">
@@ -275,19 +322,26 @@ def render_embedding_barcode_svg(
         else:
             dim_name = f"Dim {i} (Char 3-Gram Subword)"
         contributions.append((prod, dim_name))
-        for y, val, tag, is_prod in ((28, qv, "Q", False), (56, dv, "D", False), (84, prod, "Q*D", True)):
+        for y, val, tag, is_prod in (
+            (28, qv, "Q", False),
+            (56, dv, "D", False),
+            (84, prod, "Q*D", True),
+        ):
             rects.append(
                 f'<rect x="{x:.1f}" y="{y}" width="{cell_w - 0.6:.1f}" height="20" '
                 f'fill="{val_to_color(val, is_prod)}"><title>{_esc(dim_name)}: {tag}[{i}] = {val:+.4f}</title></rect>'
             )
 
     contributions.sort(key=lambda item: item[0], reverse=True)
-    top_badges = " ".join(
-        f'<span style="background:#134e4a;color:#5eead4;padding:2px 8px;border-radius:999px;font-size:11px;font-family:monospace;">'
-        f"{_esc(lbl)} (+{sc:.3f})</span>"
-        for sc, lbl in contributions[:4]
-        if sc > 0.001
-    ) or '<span style="color:#94a3b8;font-size:11px;">Low dimensional overlap</span>'
+    top_badges = (
+        " ".join(
+            f'<span style="background:#134e4a;color:#5eead4;padding:2px 8px;border-radius:999px;font-size:11px;font-family:monospace;">'
+            f"{_esc(lbl)} (+{sc:.3f})</span>"
+            for sc, lbl in contributions[:4]
+            if sc > 0.001
+        )
+        or '<span style="color:#94a3b8;font-size:11px;">Low dimensional overlap</span>'
+    )
 
     sem_end_x = x_offset + num_clusters * cell_w
     lex_end_x = x_offset + lex_end * cell_w
@@ -322,11 +376,39 @@ def render_embedding_barcode_svg(
 
 
 TOPIC_PALETTE: list[tuple[str, str, set[str]]] = [
-    ("Battery & Chemistry", "#c084fc", {"battery", "lfp", "nmc", "solid-state", "electrolyte", "density"}),
-    ("Charging & 800V/V2H", "#38bdf8", {"charging", "800-volt", "nacs", "preconditioning", "bidirectional", "v2h", "soc"}),
-    ("Motors & Regen Braking", "#2dd4bf", {"regenerative", "braking", "motor", "torque", "pmsm", "induction", "pedal"}),
-    ("Efficiency & Winter Thermal", "#fbbf24", {"mpge", "efficiency", "aerodynamic", "heat", "pump", "winter", "cold"}),
-    ("History, Safety & BMS", "#fb7185", {"1899", "jamais", "apollo", "lunar", "bms", "pyrotechnic", "12-volt"}),
+    (
+        "Battery & Chemistry",
+        "#c084fc",
+        {"battery", "lfp", "nmc", "solid-state", "electrolyte", "density"},
+    ),
+    (
+        "Charging & 800V/V2H",
+        "#38bdf8",
+        {
+            "charging",
+            "800-volt",
+            "nacs",
+            "preconditioning",
+            "bidirectional",
+            "v2h",
+            "soc",
+        },
+    ),
+    (
+        "Motors & Regen Braking",
+        "#2dd4bf",
+        {"regenerative", "braking", "motor", "torque", "pmsm", "induction", "pedal"},
+    ),
+    (
+        "Efficiency & Winter Thermal",
+        "#fbbf24",
+        {"mpge", "efficiency", "aerodynamic", "heat", "pump", "winter", "cold"},
+    ),
+    (
+        "History, Safety & BMS",
+        "#fb7185",
+        {"1899", "jamais", "apollo", "lunar", "bms", "pyrotechnic", "12-volt"},
+    ),
 ]
 
 
@@ -351,7 +433,10 @@ def _project_2d_deterministic(
     q_centered = [query_vec[d] - mean_vec[d] for d in range(dim)]
 
     def power_axis(deflate_axis: list[float] | None = None) -> list[float]:
-        w = [math.sin((d + 1) * 1.7) if deflate_axis is None else math.cos((d + 1) * 2.3) for d in range(dim)]
+        w = [
+            math.sin((d + 1) * 1.7) if deflate_axis is None else math.cos((d + 1) * 2.3)
+            for d in range(dim)
+        ]
         for _ in range(18):
             new_w = [0.0] * dim
             for row in centered:
@@ -385,7 +470,10 @@ def render_embedding_space_2d_svg(
         return ""
 
     scored = sorted(
-        ((idx, cosine_similarity(query_vec, emb)) for idx, emb in enumerate(embeddings)),
+        (
+            (idx, cosine_similarity(query_vec, emb))
+            for idx, emb in enumerate(embeddings)
+        ),
         key=lambda item: item[1],
         reverse=True,
     )
@@ -423,14 +511,14 @@ def render_embedding_space_2d_svg(
             nodes_svg.append(
                 f'<g><circle cx="{cx:.1f}" cy="{cy:.1f}" r="11" fill="none" stroke="#2dd4bf" stroke-width="2" />'
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="6.5" fill="{color}" stroke="#020617" stroke-width="1.5">'
-                f'<title>Top #{rank} (cos={sim_val:.4f}) · {_esc(topic_lbl)}&#10;{_esc(chunk_text)}</title></circle>'
+                f"<title>Top #{rank} (cos={sim_val:.4f}) · {_esc(topic_lbl)}&#10;{_esc(chunk_text)}</title></circle>"
                 f'<text x="{cx + 12:.1f}" y="{cy + 4:.1f}" fill="#f8fafc" font-size="11" font-weight="bold" font-family="monospace">'
                 f"#{rank} ({sim_val:.2f})</text></g>"
             )
         else:
             nodes_svg.append(
                 f'<g><circle cx="{cx:.1f}" cy="{cy:.1f}" r="5.5" fill="{color}" opacity="0.72" stroke="#0f172a" stroke-width="1">'
-                f'<title>Fact #{idx + 1} (cos={sim_val:.4f}) · {_esc(topic_lbl)}&#10;{_esc(chunk_text)}</title></circle></g>'
+                f"<title>Fact #{idx + 1} (cos={sim_val:.4f}) · {_esc(topic_lbl)}&#10;{_esc(chunk_text)}</title></circle></g>"
             )
 
     legend_items = "".join(
@@ -481,7 +569,7 @@ def render_chunk_timeline_svg(
 
     heading_svg = [
         f'<line x1="{hx:.1f}" y1="22" x2="{hx:.1f}" y2="122" stroke="#64748b" stroke-width="1" stroke-dasharray="2 2">'
-        f'<title>Heading @ char {h_pos}: {_esc(h_title)}</title></line>'
+        f"<title>Heading @ char {h_pos}: {_esc(h_title)}</title></line>"
         f'<circle cx="{hx:.1f}" cy="22" r="3" fill="#94a3b8"><title>Heading: {_esc(h_title)}</title></circle>'
         for h_pos, h_title in extract_markdown_headings(raw_text)
         for hx in (pad_l + (h_pos / total_chars) * track_w,)
@@ -497,7 +585,7 @@ def render_chunk_timeline_svg(
         col = palette[idx % len(palette)]
         chunk_bars_svg.append(
             f'<g><rect x="{x1:.1f}" y="{y}" width="{bw:.1f}" height="16" rx="4" fill="{col}" opacity="0.88" stroke="#020617" stroke-width="1">'
-            f'<title>Chunk #{ch.chunk_id} ({_esc(ch.section_title)}) · chars {ch.start_char}..{ch.end_char} ({ch.char_length} chars, overlap={ch.overlap_chars})</title></rect>'
+            f"<title>Chunk #{ch.chunk_id} ({_esc(ch.section_title)}) · chars {ch.start_char}..{ch.end_char} ({ch.char_length} chars, overlap={ch.overlap_chars})</title></rect>"
             f'<text x="{x1 + bw / 2:.1f}" y="{y + 11.5:.1f}" fill="#020617" font-size="10" font-weight="bold" font-family="monospace" text-anchor="middle">#{ch.chunk_id}</text></g>'
         )
         if idx > 0 and ch.start_char < chunks[idx - 1].end_char:
@@ -506,7 +594,7 @@ def render_chunk_timeline_svg(
             ox2 = pad_l + (min(total_chars, prev.end_char) / total_chars) * track_w
             overlap_zones_svg.append(
                 f'<rect x="{ox1:.1f}" y="38" width="{max(3.0, ox2 - ox1):.1f}" height="80" fill="#f59e0b" opacity="0.26">'
-                f'<title>Sliding Overlap between Chunk #{prev.chunk_id} and #{ch.chunk_id} ({ch.overlap_chars} chars)</title></rect>'
+                f"<title>Sliding Overlap between Chunk #{prev.chunk_id} and #{ch.chunk_id} ({ch.overlap_chars} chars)</title></rect>"
             )
 
     max_len = max([target_chunk_size] + [c.char_length for c in chunks] + [100])
@@ -518,7 +606,7 @@ def render_chunk_timeline_svg(
 
     hist_bars = [
         f'<g><rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{bh:.1f}" rx="3" fill="{palette[idx % len(palette)]}">'
-        f'<title>Chunk #{ch.chunk_id}: {ch.char_length} chars ({ch.word_count} words)</title></rect>'
+        f"<title>Chunk #{ch.chunk_id}: {ch.char_length} chars ({ch.word_count} words)</title></rect>"
         f'<text x="{bx + bar_w / 2:.1f}" y="{by - 4:.1f}" fill="#cbd5e1" font-size="9.5" font-family="monospace" text-anchor="middle">{ch.char_length}</text>'
         f'<text x="{bx + bar_w / 2:.1f}" y="{hist_bottom + 12:.1f}" fill="#94a3b8" font-size="9.5" font-family="monospace" text-anchor="middle">#{ch.chunk_id}</text></g>'
         for idx, ch in enumerate(chunks)
@@ -563,20 +651,21 @@ def render_vector_hits_card(hits: Sequence[DuckDBChunkRecord], top_k: int) -> st
     rows = [
         _metric_row(
             f'<span style="color:#f8fafc;font-family:monospace;"><strong>#{idx + 1}</strong> · '
-            f'<code>{_esc(r.doc_source)}</code> &gt; <strong>{_esc(r.section_title)}</strong> (Chunk #{r.chunk_id})</span>',
+            f"<code>{_esc(r.doc_source)}</code> &gt; <strong>{_esc(r.section_title)}</strong> (Chunk #{r.chunk_id})</span>",
             f'<span style="color:#2dd4bf;font-family:monospace;font-weight:700;">vector_score = {r.score:.4f}</span>',
             max(5.0, min(100.0, r.score * 100.0)),
             "linear-gradient(90deg,#0284c7,#2dd4bf)",
             boxed=True,
             sub_html=f'<div style="font-size:12px;color:#94a3b8;font-family:ui-monospace,monospace;margin-top:5px;">'
-            f'{_esc(_trunc(r.text.replace(chr(10), " "), 145, "..."))}</div>',
+            f"{_esc(_trunc(r.text.replace(chr(10), ' '), 145, '...'))}</div>",
         )
         for idx, r in enumerate(hits)
     ]
     return _card_shell(
         f"📊 DuckDB Cosine Similarity Ranking (Top-{top_k} Results)",
         "",
-        "".join(rows) or '<div style="color:#94a3b8;font-size:12px;">Enter a query to search DuckDB.</div>',
+        "".join(rows)
+        or '<div style="color:#94a3b8;font-size:12px;">Enter a query to search DuckDB.</div>',
         margin="8px 0",
     )
 
@@ -677,17 +766,17 @@ def render_rerank_slopegraph_svg(
         lines_svg.append(
             f'<path d="M {x_left} {y1} C {x_left + 85} {y1}, {x_right - 85} {y2}, {x_right} {y2}" '
             f'fill="none" stroke="{col}" stroke-width="{stroke_w}" opacity="{opacity}">'
-            f'<title>Chunk #{item.chunk_id} ({_esc(item.section_title)}): Stage-1 #{item.stage1_rank} → Stage-2 #{item.stage2_rank} (CE={item.rerank_score:.4f})</title></path>'
+            f"<title>Chunk #{item.chunk_id} ({_esc(item.section_title)}): Stage-1 #{item.stage1_rank} → Stage-2 #{item.stage2_rank} (CE={item.rerank_score:.4f})</title></path>"
         )
         short_sec = _trunc(item.section_title, 22)
         nodes_svg.append(
             f'<g><circle cx="{x_left}" cy="{y1}" r="5" fill="#64748b"/>'
             f'<text x="{x_left - 10}" y="{y1 + 4}" fill="#cbd5e1" font-size="10.5" font-family="monospace" text-anchor="end">'
-            f'#{item.stage1_rank} Chunk {item.chunk_id} ({_esc(short_sec)})</text>'
+            f"#{item.stage1_rank} Chunk {item.chunk_id} ({_esc(short_sec)})</text>"
             f'<circle cx="{x_right}" cy="{y2}" r="5.5" fill="{col}"/>'
             f'<text x="{x_right + 10}" y="{y2 + 4}" fill="{"#f8fafc" if in_top_k else "#64748b"}" '
             f'font-size="10.5" font-weight="{"bold" if in_top_k else "normal"}" font-family="monospace">'
-            f'#{item.stage2_rank} Chunk {item.chunk_id} [CE={item.rerank_score:.3f} | {delta_txt}]</text></g>'
+            f"#{item.stage2_rank} Chunk {item.chunk_id} [CE={item.rerank_score:.3f} | {delta_txt}]</text></g>"
         )
 
     svg = _svg_frame(
@@ -718,8 +807,12 @@ def render_cross_attention_heatmap_svg(
     explanation: str,
 ) -> str:
     """Render a 2D Cross-Attention Token x Sentence interaction heatmap."""
-    q_tokens = list(dict.fromkeys(tokenize(query, stem=False, drop_stopwords=True)))[:10] or ["query"]
-    sentences = [s for s in split_sentences(chunk_text, min_len=9) if not s.startswith("#")][:5] or [chunk_text[:120]]
+    q_tokens = list(dict.fromkeys(tokenize(query, stem=False, drop_stopwords=True)))[
+        :10
+    ] or ["query"]
+    sentences = [
+        s for s in split_sentences(chunk_text, min_len=9) if not s.startswith("#")
+    ][:5] or [chunk_text[:120]]
 
     col_w, row_h, pad_l, pad_t = 54, 28, 185, 52
     width = max(480, pad_l + len(q_tokens) * col_w + 30)
@@ -735,7 +828,7 @@ def render_cross_attention_heatmap_svg(
         s_set = set(tokenize(sent, stem=False, drop_stopwords=True))
         cells_svg.append(
             f'<text x="10" y="{y + 17}" fill="#cbd5e1" font-size="10" font-family="monospace">'
-            f'S{r_idx + 1}: {_esc(_trunc(sent, 24, "..."))}<title>{_esc(sent)}</title></text>'
+            f"S{r_idx + 1}: {_esc(_trunc(sent, 24, '...'))}<title>{_esc(sent)}</title></text>"
         )
         for c_idx, qt in enumerate(q_tokens):
             x = pad_l + c_idx * col_w
@@ -748,7 +841,11 @@ def render_cross_attention_heatmap_svg(
             fill, lbl, tip = (
                 ("#14b8a6", "1.0", "Exact Match")
                 if exact_hit
-                else (("#0369a1", "0.5", "Stem Match") if partial_hit else ("#0f172a", "·", "No Match"))
+                else (
+                    ("#0369a1", "0.5", "Stem Match")
+                    if partial_hit
+                    else ("#0f172a", "·", "No Match")
+                )
             )
             cells_svg.append(
                 f'<g><rect x="{x + 2}" y="{y + 2}" width="{col_w - 4}" height="{row_h - 4}" rx="4" fill="{fill}" stroke="#1e293b">'
@@ -760,7 +857,7 @@ def render_cross_attention_heatmap_svg(
         width,
         height,
         f'<text x="10" y="22" fill="#94a3b8" font-size="10" font-family="monospace">Passage Sentences ↓ \\ Query Tokens →</text>'
-        f'{"".join(headers_svg)}{"".join(cells_svg)}',
+        f"{''.join(headers_svg)}{''.join(cells_svg)}",
         responsive=False,
     )
     return _card_shell(
@@ -780,12 +877,18 @@ def build_agentic_mermaid_diagram(trace: AgenticTrace) -> str:
     for step in trace.retrieval_steps:
         sq_id, ch_id = f"SQ{step.step_number}", f"CH{step.step_number}"
         ch_lbl = f"Chunk #{step.top_chunk_id}: {_clean_mermaid_label(step.top_section, 22)} ({step.rerank_score:.2f})"
-        lines.append(f'    Plan --> {sq_id}["Step {step.step_number}: {_clean_mermaid_label(step.sub_query, 32)}"]')
+        lines.append(
+            f'    Plan --> {sq_id}["Step {step.step_number}: {_clean_mermaid_label(step.sub_query, 32)}"]'
+        )
         lines.append(f'    {sq_id} --> {ch_id}[("{ch_lbl}")]')
         lines.append(f"    {ch_id} --> Gate")
     gate_status = "Pass" if trace.sufficiency_passed else "Retry Triggered"
-    lines.append(f'    Gate{{"Sufficiency Gate: {gate_status}"}} --> LLM["Llama.app Synthesis ({len(trace.final_context_chunks)} Chunks)"]')
-    lines.append(f'    LLM --> Audit["Faithfulness Audit: {trace.faithfulness_score:.0%}"]')
+    lines.append(
+        f'    Gate{{"Sufficiency Gate: {gate_status}"}} --> LLM["Llama.app Synthesis ({len(trace.final_context_chunks)} Chunks)"]'
+    )
+    lines.append(
+        f'    LLM --> Audit["Faithfulness Audit: {trace.faithfulness_score:.0%}"]'
+    )
     return "\n".join(lines)
 
 
@@ -802,13 +905,18 @@ def render_faithfulness_audit_svg(trace: AgenticTrace) -> str:
             else f'<span style="background:#4c0519;color:#fda4af;padding:2px 7px;border-radius:4px;font-family:monospace;font-size:11px;">'
             f"⚠️ Unverified ({v.confidence:.2f})</span>"
         )
-        rows_html.append(_metric_row(
-            f'<span style="color:#e2e8f0;flex:1;"><strong>Claim #{idx + 1}:</strong> {_esc(v.claim)}</span>',
-            badge,
-            max(4.0, min(100.0, v.confidence * 100.0)),
-            "#2dd4bf" if v.is_grounded else "#f43f5e",
-            bar_h=7, marker_pct=35.0, marker_title="Verification Threshold (0.35)", boxed=True,
-        ))
+        rows_html.append(
+            _metric_row(
+                f'<span style="color:#e2e8f0;flex:1;"><strong>Claim #{idx + 1}:</strong> {_esc(v.claim)}</span>',
+                badge,
+                max(4.0, min(100.0, v.confidence * 100.0)),
+                "#2dd4bf" if v.is_grounded else "#f43f5e",
+                bar_h=7,
+                marker_pct=35.0,
+                marker_title="Verification Threshold (0.35)",
+                boxed=True,
+            )
+        )
     return _card_shell(
         f"🛡️ Claim-by-Claim Grounding & Faithfulness Meter (Overall: {trace.faithfulness_score:.0%})",
         '<span style="color:#fbbf24;font-family:monospace;">│ Amber Line = 0.35 Grounding Threshold</span>',
@@ -826,26 +934,40 @@ def build_studio_pipeline_mermaid(
     total_chunks: int,
 ) -> str:
     """Build a dynamic Mermaid flowchart for Notebook 4 Pipeline B."""
-    chunk_lbl = "Markdown Section Chunker" if chunk_strategy == "markdown" else "Fixed-Char Sliding Window"
+    chunk_lbl = (
+        "Markdown Section Chunker"
+        if chunk_strategy == "markdown"
+        else "Fixed-Char Sliding Window"
+    )
     hybrid_lbl = f"Hybrid RRF (α={alpha:.1f} Vec / {1.0 - alpha:.1f} BM25)"
     rerank_node = (
         f'Rerank["Stage-2 Cross-Encoder (Top-{top_k})"]'
         if use_reranker or use_agentic
         else f'Rerank["Reranker Bypassed (Direct Top-{top_k})"]'
     )
-    agent_node = 'Plan{{"Agentic Multi-Hop Planner"}}' if use_agentic else 'Plan["Single-Shot Query"]'
-    verify_node = 'Verify["Faithfulness Audit & Citations"]' if use_agentic else 'Verify["Grounded Answer"]'
-    return "\n".join([
-        "flowchart LR",
-        f'    Docs["Corpus + Custom Doc"] --> Chunker["{chunk_lbl}"]',
-        f'    Chunker --> DB[("DuckDB Store ({total_chunks} Chunks)")]',
-        f'    Q["User Question"] --> {agent_node}',
-        f'    Plan --> Hybrid["{hybrid_lbl}"]',
-        "    DB --> Hybrid",
-        f"    Hybrid --> {rerank_node}",
-        '    Rerank --> LLM["Llama.app Synthesis"]',
-        f"    LLM --> {verify_node}",
-    ])
+    agent_node = (
+        'Plan{{"Agentic Multi-Hop Planner"}}'
+        if use_agentic
+        else 'Plan["Single-Shot Query"]'
+    )
+    verify_node = (
+        'Verify["Faithfulness Audit & Citations"]'
+        if use_agentic
+        else 'Verify["Grounded Answer"]'
+    )
+    return "\n".join(
+        [
+            "flowchart LR",
+            f'    Docs["Corpus + Custom Doc"] --> Chunker["{chunk_lbl}"]',
+            f'    Chunker --> DB[("DuckDB Store ({total_chunks} Chunks)")]',
+            f'    Q["User Question"] --> {agent_node}',
+            f'    Plan --> Hybrid["{hybrid_lbl}"]',
+            "    DB --> Hybrid",
+            f"    Hybrid --> {rerank_node}",
+            '    Rerank --> LLM["Llama.app Synthesis"]',
+            f"    LLM --> {verify_node}",
+        ]
+    )
 
 
 def render_ab_arena_comparison_svg(
@@ -854,22 +976,33 @@ def render_ab_arena_comparison_svg(
 ) -> str:
     """Render side-by-side relevance bars for Pipeline A vs. Pipeline B."""
 
-    def _bar_rows(items: list[tuple[str, float, str]], val_color: str, bar_fill: str) -> str:
+    def _bar_rows(
+        items: list[tuple[str, float, str]], val_color: str, bar_fill: str
+    ) -> str:
         return "".join(
             _metric_row(
                 f'<span style="color:#e2e8f0;font-family:monospace;"><strong>#{i + 1}</strong> {_esc(lbl)}</span>',
                 f'<span style="color:{val_color};font-family:monospace;font-weight:700;">{sc_lbl}</span>',
-                pct, bar_fill,
+                pct,
+                bar_fill,
             )
             for i, (lbl, pct, sc_lbl) in enumerate(items)
         )
 
     items_a = [
-        (_trunc(txt.replace("\n", " "), 68, "..."), max(5.0, min(100.0, sc * 100.0)), f"cos={sc:.3f}")
+        (
+            _trunc(txt.replace("\n", " "), 68, "..."),
+            max(5.0, min(100.0, sc * 100.0)),
+            f"cos={sc:.3f}",
+        )
         for txt, sc in baseline_hits
     ]
     items_b = [
-        (lbl[:54], max(8.0, min(100.0, (sc * 100.0) if sc > 0.05 else (sc * 3200.0))), f"score={sc:.3f}")
+        (
+            lbl[:54],
+            max(8.0, min(100.0, (sc * 100.0) if sc > 0.05 else (sc * 3200.0))),
+            f"score={sc:.3f}",
+        )
         for lbl, sc, _ in prod_chunks
     ]
     return f"""
@@ -935,18 +1068,21 @@ def render_subgraph_traversal_svg(graph_result: GraphSearchResult) -> str:
         else:
             sx, ex = (x1 + 78, x2 - 78) if x1 < x2 else (x1 - 78, x2 + 78)
             path_d = f"M {sx:.1f} {y1:.1f} L {ex:.1f} {y2:.1f}"
-            mid_x, mid_y = (sx + ex) / 2.0, (y1 + y2) / 2.0 + (-7 if t_idx % 2 == 0 else 9)
+            mid_x, mid_y = (
+                (sx + ex) / 2.0,
+                (y1 + y2) / 2.0 + (-7 if t_idx % 2 == 0 else 9),
+            )
         edges_svg.append(
             f'<g><path d="{path_d}" fill="none" stroke="{edge_col}" stroke-width="1.8" opacity="0.85">'
-            f'<title>{_esc(triple.subject)} --[{_esc(triple.predicate)}]--> {_esc(triple.obj)} (Chunk #{triple.source_chunk_id})</title></path>'
+            f"<title>{_esc(triple.subject)} --[{_esc(triple.predicate)}]--> {_esc(triple.obj)} (Chunk #{triple.source_chunk_id})</title></path>"
             f'<text x="{mid_x:.1f}" y="{mid_y:.1f}" fill="#cbd5e1" font-size="9" font-family="monospace" text-anchor="middle">{_esc(triple.predicate[:18])}</text></g>'
         )
 
     nodes_svg = [
         f'<g><rect x="{nx - 78:.1f}" y="{ny - 15:.1f}" width="156" height="30" rx="7" fill="{col_colors[lvl][0]}" stroke="{col_colors[lvl][1]}" stroke-width="1.6">'
-        f'<title>{_esc(ent)} ({col_colors[lvl][2]})</title></rect>'
+        f"<title>{_esc(ent)} ({col_colors[lvl][2]})</title></rect>"
         f'<text x="{nx:.1f}" y="{ny + 4:.1f}" fill="#f8fafc" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">'
-        f'{_esc(_trunc(ent, 20))}</text></g>'
+        f"{_esc(_trunc(ent, 20))}</text></g>"
         for ent, (nx, ny, lvl) in positions.items()
     ]
 
@@ -956,7 +1092,7 @@ def render_subgraph_traversal_svg(graph_result: GraphSearchResult) -> str:
         f'<text x="{col_x[0]}" y="24" fill="#38bdf8" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">QUERY SEEDS</text>'
         f'<text x="{col_x[1]}" y="24" fill="#2dd4bf" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">1-HOP NEIGHBORS</text>'
         f'<text x="{col_x[2]}" y="24" fill="#c084fc" font-size="10.5" font-weight="bold" font-family="monospace" text-anchor="middle">2-HOP EXPANSION</text>'
-        f'{"".join(edges_svg)}{"".join(nodes_svg)}',
+        f"{''.join(edges_svg)}{''.join(nodes_svg)}",
     )
     return _card_shell(
         f"🕸️ Knowledge Graph 1–2 Hop Subgraph Traversal ({len(triples)} Triples Matched)",
@@ -1029,7 +1165,7 @@ def render_fusion_comparison_svg(
         f'<text x="12" y="22" fill="#38bdf8" font-size="11" font-weight="bold" font-family="monospace">Reciprocal Rank Fusion (Rank-Based)</text>'
         f'<text x="355" y="22" fill="#c084fc" font-size="11" font-weight="bold" font-family="monospace">Convex Linear Blend (Min-Max [0..1])</text>'
         f'<line x1="340" y1="12" x2="340" y2="{height - 12}" stroke="#1e293b" stroke-width="1"/>'
-        f'{"".join(rrf_bars)}{"".join(conv_bars)}',
+        f"{''.join(rrf_bars)}{''.join(conv_bars)}",
     )
     return _card_shell(
         f"⚖️ Score Fusion Arena: Reciprocal Rank Fusion (k={rrf_k}) vs. Convex Combination (α={alpha:.1f})",
@@ -1063,13 +1199,18 @@ def build_modular_rag_mermaid(
         '    Q["User Query"] --> ' + pre_node,
     ]
     if config.enable_dense_sparse:
-        since_lbl = _clean_mermaid_label(str(config.min_year) if config.min_year is not None else "any", 12)
+        since_lbl = _clean_mermaid_label(
+            str(config.min_year) if config.min_year is not None else "any", 12
+        )
         sql_note = (
             f" + SQL Filter ({_clean_mermaid_label(config.department or 'all', 18)}, since {since_lbl})"
-            if (config.department and config.department != "all") or config.min_year is not None
+            if (config.department and config.department != "all")
+            or config.min_year is not None
             else ""
         )
-        lines.append(f'    Pre --> Dense["Dense Vector Search (DuckDB 128-D){sql_note}"]')
+        lines.append(
+            f'    Pre --> Dense["Dense Vector Search (DuckDB 128-D){sql_note}"]'
+        )
         lines.append('    Pre --> Sparse["Sparse Keyword Search (Okapi BM25)"]')
         lines.append(f'    Dense --> Fuse{{"{fusion_lbl}"}}')
         lines.append("    Sparse --> Fuse")
@@ -1082,9 +1223,13 @@ def build_modular_rag_mermaid(
         lines.append("    Graph --> Fuse")
 
     if config.use_reranker:
-        lines.append(f'    Fuse --> Rerank["Stage-2 Cross-Encoder (Top-{config.stage1_k} -> Top-{config.final_top_k})"]')
+        lines.append(
+            f'    Fuse --> Rerank["Stage-2 Cross-Encoder (Top-{config.stage1_k} -> Top-{config.final_top_k})"]'
+        )
     else:
-        lines.append(f'    Fuse --> Rerank["Reranker Bypassed (Top-{config.final_top_k})"]')
+        lines.append(
+            f'    Fuse --> Rerank["Reranker Bypassed (Top-{config.final_top_k})"]'
+        )
 
     lines.append('    Rerank --> LLM["Grounded LLM Synthesis (Llama.app)"]')
     return "\n".join(lines)

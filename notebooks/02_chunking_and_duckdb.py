@@ -9,6 +9,7 @@ def _():
     import html
     import sys
     from pathlib import Path
+
     import marimo as mo
 
     _repo_root = Path(__file__).resolve().parents[1]
@@ -26,7 +27,10 @@ def _():
     )
 
     sample_docs_dir = _repo_root / "data" / "sample_docs"
-    doc_files = {p.name: p.read_text(encoding="utf-8") for p in sorted(sample_docs_dir.glob("*.md"))}
+    doc_files = {
+        p.name: p.read_text(encoding="utf-8")
+        for p in sorted(sample_docs_dir.glob("*.md"))
+    }
     embedder = get_default_embedder()
     duck_store = DuckDBVectorStore()
     return (
@@ -113,9 +117,7 @@ def _(
         target_chunk_size=chunk_size_slider.value,
     )
 
-    _avg_len = (
-        sum(c.char_length for c in preview_chunks) / max(1, len(preview_chunks))
-    )
+    _avg_len = sum(c.char_length for c in preview_chunks) / max(1, len(preview_chunks))
     _total_overlap = sum(c.overlap_chars for c in preview_chunks)
     _overlap_pct = (_total_overlap / max(1, len(_raw_text))) * 100.0
 
@@ -192,7 +194,6 @@ def _(
         {mo.accordion({"📄 Expand to Inspect Individual Chunk Cards (" + str(len(preview_chunks)) + " chunks)": mo.Html("".join(_cards))}, expanded=True)}
         """
     )
-    return
 
 
 @app.cell
@@ -291,7 +292,7 @@ def _(
     try:
         _sql_rows = duck_store.run_custom_sql(sql_playground_input.value)
         _sql_status = f"✅ Returned {len(_sql_rows)} row(s)"
-    except Exception as _exc:
+    except ValueError as _exc:
         _sql_rows = [{"error": str(_exc)}]
         _sql_status = "⚠️ SQL Error"
 
@@ -330,7 +331,6 @@ def _(
         {mo.ui.table(_sql_rows, selection=None)}
         """
     )
-    return
 
 
 if __name__ == "__main__":

@@ -30,100 +30,426 @@ _NO_REDIRECT_OPENER = urllib.request.build_opener(
     _NoRedirectHandler,
 )
 
-STOPWORDS: frozenset[str] = frozenset({
-    "the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for",
-    "of", "and", "or", "by", "with", "from", "that", "this", "it", "as", "be",
-    "can", "how", "what", "why", "which", "who", "when", "where", "do", "does",
-    "did", "many", "much", "should", "i", "my", "our", "use", "used",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "and",
+        "or",
+        "by",
+        "with",
+        "from",
+        "that",
+        "this",
+        "it",
+        "as",
+        "be",
+        "can",
+        "how",
+        "what",
+        "why",
+        "which",
+        "who",
+        "when",
+        "where",
+        "do",
+        "does",
+        "did",
+        "many",
+        "much",
+        "should",
+        "i",
+        "my",
+        "our",
+        "use",
+        "used",
+    }
+)
 
 SEMANTIC_CLUSTERS: list[tuple[str, set[str]]] = [
-    ("ev_efficiency_mpge", {
-        "efficiency", "efficient", "mpge", "gallon", "gasoline", "combustion",
-        "energy", "85%", "90%", "33.7", "135", "kwh", "miles", "consumption",
-        "aerodynamic", "drag", "highway", "velocity", "emissions", "carbon",
-    }),
-    ("ev_regen_braking_driving", {
-        "regenerative", "braking", "brake", "brakes", "deceleration", "kinetic",
-        "generator", "70%", "friction", "pedal", "one-pedal", "rotors", "pads",
-        "100000", "150000", "slowing", "stop",
-    }),
-    ("ev_battery_chemistry", {
-        "battery", "batteries", "chemistry", "lfp", "phosphate", "iron", "nmc",
-        "nca", "nickel", "cobalt", "manganese", "solid-state", "solid",
-        "electrolyte", "anode", "density", "wh", "kg", "degradation", "cycles",
-    }),
-    ("ev_charging_800v_nacs", {
-        "charging", "charge", "charger", "fast", "dc", "800-volt", "800v",
-        "400-volt", "350", "kw", "nacs", "j3400", "connector", "soc", "80%",
-        "taper", "plating", "preconditioning", "bidirectional", "v2h", "v2g",
-        "blackout", "household", "grid",
-    }),
-    ("ev_motors_torque_powertrain", {
-        "motor", "motors", "torque", "rpm", "instantaneous", "transmission",
-        "pmsm", "permanent", "magnet", "neodymium", "synchronous", "induction",
-        "electromagnetic", "freewheel", "cogging", "wheel", "wheels",
-    }),
-    ("ev_thermal_winter_heatpump", {
-        "cold", "winter", "freezing", "weather", "temperature", "range", "heat",
-        "pump", "pumps", "cabin", "heating", "heater", "ptc", "resistive",
-        "viscosity", "ambient", "thermal",
-    }),
-    ("ev_history_space_lunar", {
-        "history", "1899", "jamais", "contente", "jenatzy", "belgian", "100",
-        "105.88", "first", "apollo", "lunar", "roving", "moon", "1971", "1972",
-        "silver-zinc",
-    }),
-    ("ev_safety_bms_electrical", {
-        "bms", "management", "isolation", "chassis", "contactor", "contactors",
-        "pyrotechnic", "collision", "orange", "high-voltage", "12-volt",
-        "auxiliary", "dc-to-dc", "converter",
-    }),
-    ("rag_hallucination_grounding", {
-        "rag", "retrieval", "augmented", "generation", "hallucinate",
-        "hallucination", "cutoff", "private", "grounding", "grounded", "context",
-        "prompt", "parametric", "proto-rag-101", "lewis",
-    }),
-    ("vectors_cosine_embeddings", {
-        "vector", "vectors", "embedding", "embeddings", "cosine", "similarity",
-        "dot", "product", "norm", "magnitude", "angle", "euclidean", "bge",
-        "dimension", "768", "384", "128", "err-vec-768", "err-chunk-004",
-    }),
-    ("duckdb_sql_storage", {
-        "duckdb", "sql", "database", "table", "array_cosine_similarity",
-        "float", "vss", "hnsw", "fts", "index", "persistent", "memory",
-    }),
-    ("hybrid_bm25_rrf", {
-        "hybrid", "bm25", "keyword", "lexical", "semantic", "rrf", "reciprocal",
-        "rank", "fusion", "rrf-k60", "bm25-k1-1.2", "k1", "exact", "code",
-        "identifier",
-    }),
-    ("reranking_cross_encoder", {
-        "rerank", "reranker", "reranking", "cross-encoder", "bi-encoder",
-        "ms-marco", "stage", "stage2-rerank-15to3", "noise", "distractor",
-        "precision", "lost", "middle", "attention",
-    }),
-    ("agentic_rag_workflow", {
-        "agent", "agentic", "multi-hop", "multi-step", "decompose",
-        "decomposition", "planner", "sub-query", "iterative", "verify",
-        "verification", "verifier", "faithfulness", "audit", "citation",
-    }),
-    ("chunking_splitting", {
-        "chunk", "chunks", "chunking", "split", "splitting", "overlap",
-        "boundary", "window", "token", "tokens", "section", "markdown",
-        "character", "paragraph",
-    }),
-    ("graph_rag_knowledge", {
-        "graph", "graphrag", "knowledge", "entity", "entities", "triple",
-        "triples", "relation", "relationship", "relationships", "hop", "hops",
-        "traverse", "traversal", "subgraph", "node", "edge",
-    }),
-    ("modular_query_expansion", {
-        "modular", "hyde", "hypothetical", "multi-query", "expansion", "expand",
-        "convex", "linear", "normalization", "splade", "dense", "sparse",
-        "metadata", "filter", "filtering", "qdrant", "weaviate", "pinecone",
-        "elasticsearch", "cohere", "convex-alpha-70",
-    }),
+    (
+        "ev_efficiency_mpge",
+        {
+            "efficiency",
+            "efficient",
+            "mpge",
+            "gallon",
+            "gasoline",
+            "combustion",
+            "energy",
+            "85%",
+            "90%",
+            "33.7",
+            "135",
+            "kwh",
+            "miles",
+            "consumption",
+            "aerodynamic",
+            "drag",
+            "highway",
+            "velocity",
+            "emissions",
+            "carbon",
+        },
+    ),
+    (
+        "ev_regen_braking_driving",
+        {
+            "regenerative",
+            "braking",
+            "brake",
+            "brakes",
+            "deceleration",
+            "kinetic",
+            "generator",
+            "70%",
+            "friction",
+            "pedal",
+            "one-pedal",
+            "rotors",
+            "pads",
+            "100000",
+            "150000",
+            "slowing",
+            "stop",
+        },
+    ),
+    (
+        "ev_battery_chemistry",
+        {
+            "battery",
+            "batteries",
+            "chemistry",
+            "lfp",
+            "phosphate",
+            "iron",
+            "nmc",
+            "nca",
+            "nickel",
+            "cobalt",
+            "manganese",
+            "solid-state",
+            "solid",
+            "electrolyte",
+            "anode",
+            "density",
+            "wh",
+            "kg",
+            "degradation",
+            "cycles",
+        },
+    ),
+    (
+        "ev_charging_800v_nacs",
+        {
+            "charging",
+            "charge",
+            "charger",
+            "fast",
+            "dc",
+            "800-volt",
+            "800v",
+            "400-volt",
+            "350",
+            "kw",
+            "nacs",
+            "j3400",
+            "connector",
+            "soc",
+            "80%",
+            "taper",
+            "plating",
+            "preconditioning",
+            "bidirectional",
+            "v2h",
+            "v2g",
+            "blackout",
+            "household",
+            "grid",
+        },
+    ),
+    (
+        "ev_motors_torque_powertrain",
+        {
+            "motor",
+            "motors",
+            "torque",
+            "rpm",
+            "instantaneous",
+            "transmission",
+            "pmsm",
+            "permanent",
+            "magnet",
+            "neodymium",
+            "synchronous",
+            "induction",
+            "electromagnetic",
+            "freewheel",
+            "cogging",
+            "wheel",
+            "wheels",
+        },
+    ),
+    (
+        "ev_thermal_winter_heatpump",
+        {
+            "cold",
+            "winter",
+            "freezing",
+            "weather",
+            "temperature",
+            "range",
+            "heat",
+            "pump",
+            "pumps",
+            "cabin",
+            "heating",
+            "heater",
+            "ptc",
+            "resistive",
+            "viscosity",
+            "ambient",
+            "thermal",
+        },
+    ),
+    (
+        "ev_history_space_lunar",
+        {
+            "history",
+            "1899",
+            "jamais",
+            "contente",
+            "jenatzy",
+            "belgian",
+            "100",
+            "105.88",
+            "first",
+            "apollo",
+            "lunar",
+            "roving",
+            "moon",
+            "1971",
+            "1972",
+            "silver-zinc",
+        },
+    ),
+    (
+        "ev_safety_bms_electrical",
+        {
+            "bms",
+            "management",
+            "isolation",
+            "chassis",
+            "contactor",
+            "contactors",
+            "pyrotechnic",
+            "collision",
+            "orange",
+            "high-voltage",
+            "12-volt",
+            "auxiliary",
+            "dc-to-dc",
+            "converter",
+        },
+    ),
+    (
+        "rag_hallucination_grounding",
+        {
+            "rag",
+            "retrieval",
+            "augmented",
+            "generation",
+            "hallucinate",
+            "hallucination",
+            "cutoff",
+            "private",
+            "grounding",
+            "grounded",
+            "context",
+            "prompt",
+            "parametric",
+            "proto-rag-101",
+            "lewis",
+        },
+    ),
+    (
+        "vectors_cosine_embeddings",
+        {
+            "vector",
+            "vectors",
+            "embedding",
+            "embeddings",
+            "cosine",
+            "similarity",
+            "dot",
+            "product",
+            "norm",
+            "magnitude",
+            "angle",
+            "euclidean",
+            "bge",
+            "dimension",
+            "768",
+            "384",
+            "128",
+            "err-vec-768",
+            "err-chunk-004",
+        },
+    ),
+    (
+        "duckdb_sql_storage",
+        {
+            "duckdb",
+            "sql",
+            "database",
+            "table",
+            "array_cosine_similarity",
+            "float",
+            "vss",
+            "hnsw",
+            "fts",
+            "index",
+            "persistent",
+            "memory",
+        },
+    ),
+    (
+        "hybrid_bm25_rrf",
+        {
+            "hybrid",
+            "bm25",
+            "keyword",
+            "lexical",
+            "semantic",
+            "rrf",
+            "reciprocal",
+            "rank",
+            "fusion",
+            "rrf-k60",
+            "bm25-k1-1.2",
+            "k1",
+            "exact",
+            "code",
+            "identifier",
+        },
+    ),
+    (
+        "reranking_cross_encoder",
+        {
+            "rerank",
+            "reranker",
+            "reranking",
+            "cross-encoder",
+            "bi-encoder",
+            "ms-marco",
+            "stage",
+            "stage2-rerank-15to3",
+            "noise",
+            "distractor",
+            "precision",
+            "lost",
+            "middle",
+            "attention",
+        },
+    ),
+    (
+        "agentic_rag_workflow",
+        {
+            "agent",
+            "agentic",
+            "multi-hop",
+            "multi-step",
+            "decompose",
+            "decomposition",
+            "planner",
+            "sub-query",
+            "iterative",
+            "verify",
+            "verification",
+            "verifier",
+            "faithfulness",
+            "audit",
+            "citation",
+        },
+    ),
+    (
+        "chunking_splitting",
+        {
+            "chunk",
+            "chunks",
+            "chunking",
+            "split",
+            "splitting",
+            "overlap",
+            "boundary",
+            "window",
+            "token",
+            "tokens",
+            "section",
+            "markdown",
+            "character",
+            "paragraph",
+        },
+    ),
+    (
+        "graph_rag_knowledge",
+        {
+            "graph",
+            "graphrag",
+            "knowledge",
+            "entity",
+            "entities",
+            "triple",
+            "triples",
+            "relation",
+            "relationship",
+            "relationships",
+            "hop",
+            "hops",
+            "traverse",
+            "traversal",
+            "subgraph",
+            "node",
+            "edge",
+        },
+    ),
+    (
+        "modular_query_expansion",
+        {
+            "modular",
+            "hyde",
+            "hypothetical",
+            "multi-query",
+            "expansion",
+            "expand",
+            "convex",
+            "linear",
+            "normalization",
+            "splade",
+            "dense",
+            "sparse",
+            "metadata",
+            "filter",
+            "filtering",
+            "qdrant",
+            "weaviate",
+            "pinecone",
+            "elasticsearch",
+            "cohere",
+            "convex-alpha-70",
+        },
+    ),
 ]
 
 
@@ -144,9 +470,9 @@ def tokenize(
             continue
         if len(tok) > 4 and tok.endswith("ing"):
             tokens.append(tok[:-3])
-        elif len(tok) > 4 and tok.endswith("ed"):
-            tokens.append(tok[:-2])
-        elif len(tok) > 3 and tok.endswith("es"):
+        elif (len(tok) > 4 and tok.endswith("ed")) or (
+            len(tok) > 3 and tok.endswith("es")
+        ):
             tokens.append(tok[:-2])
         elif len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
             tokens.append(tok[:-1])
@@ -205,7 +531,9 @@ class LocalEmbeddingEngine:
         compact = re.sub(r"\s+", " ", cleaned.lower())
         for i in range(max(0, len(compact) - 2)):
             h = int.from_bytes(
-                hashlib.md5(compact[i : i + 3].encode("utf-8"), usedforsecurity=False).digest()[:2],
+                hashlib.md5(
+                    compact[i : i + 3].encode("utf-8"), usedforsecurity=False
+                ).digest()[:2],
                 "little",
             )
             vec[ngram_start + (h % ngram_span)] += 0.25
@@ -238,7 +566,15 @@ class LlamaMacOSClient:
             parsed.scheme not in ("http", "https")
             or not parsed.netloc
             or parsed.hostname not in _LOOPBACK_HOSTS
-            or any((parsed.username, parsed.password, parsed.params, parsed.query, parsed.fragment))
+            or any(
+                (
+                    parsed.username,
+                    parsed.password,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
         ):
             raise ValueError(f"Invalid loopback HTTP(S) base_url: {base_url!r}")
         self.base_url = cleaned_url
@@ -266,29 +602,33 @@ class LlamaMacOSClient:
             raise ValueError("Response exceeded 1 MiB safety limit.")
         parsed = json.loads(raw.decode("utf-8"))
         if not isinstance(parsed, dict):
-            raise ValueError("Expected JSON object response.")
+            raise TypeError("Expected JSON object response.")
         return parsed
 
     def check_health(self) -> tuple[bool, list[str], str]:
         """Query `GET /v1/models` to verify Llama.app availability."""
         try:
             payload = self._request_json("/v1/models", timeout=2.5)
-            models = sorted({
-                str(item["id"])
-                for item in payload.get("data", [])
-                if isinstance(item, dict) and item.get("id")
-            })
+            models = sorted(
+                {
+                    str(item["id"])
+                    for item in payload.get("data", [])
+                    if isinstance(item, dict) and item.get("id")
+                }
+            )
             return (
                 True,
                 models,
                 f"Connected to Llama.app at {self.base_url} ({len(models)} model(s) found)",
             )
-        except (OSError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             return (
                 False,
                 [],
-                f"Llama.app server not detected at {self.base_url} ({exc.__class__.__name__}). "
-                "Using built-in educational fallback mode so all interactive demos remain runnable.",
+                (
+                    f"Llama.app server not detected at {self.base_url} ({exc.__class__.__name__}). "
+                    "Using built-in educational fallback mode so all interactive demos remain runnable."
+                ),
             )
 
     def generate(
@@ -332,14 +672,16 @@ class LlamaMacOSClient:
                     )
                     choices = resp_json.get("choices") or []
                     if choices and isinstance(choices[0], dict):
-                        content = str((choices[0].get("message") or {}).get("content") or "").strip()
+                        content = str(
+                            (choices[0].get("message") or {}).get("content") or ""
+                        ).strip()
                         return LLMGenerationResult(
                             content=content,
                             model=selected_model,
                             backend="llama-macos",
                             latency_ms=round((time.perf_counter() - t0) * 1000.0, 1),
                         )
-                except (OSError, ValueError):
+                except OSError, TypeError, ValueError:
                     pass
 
         fallback_text = self._synthesize_educational_response(
@@ -375,7 +717,9 @@ class LlamaMacOSClient:
                 if s_clean.startswith("#"):
                     continue
                 overlap = len(q_tokens & set(tokenize(s_clean)))
-                scored_sentences.append((overlap + (0.25 if c_idx == 0 else 0.0), c_idx + 1, s_clean))
+                scored_sentences.append(
+                    (overlap + (0.25 if c_idx == 0 else 0.0), c_idx + 1, s_clean)
+                )
 
         scored_sentences.sort(key=lambda item: item[0], reverse=True)
         top_picks = scored_sentences[:3] if scored_sentences else [(1.0, 1, chunks[0])]

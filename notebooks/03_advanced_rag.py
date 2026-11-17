@@ -9,6 +9,7 @@ def _():
     import html
     import sys
     from pathlib import Path
+
     import marimo as mo
 
     _repo_root = Path(__file__).resolve().parents[1]
@@ -73,7 +74,11 @@ def _(llm_client, mo):
 
 @app.cell
 def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
-    _badge = "🟢 **Llama.app Connected**" if is_online else "🟡 **Offline Educational Fallback Active**"
+    _badge = (
+        "🟢 **Llama.app Connected**"
+        if is_online
+        else "🟡 **Offline Educational Fallback Active**"
+    )
     mo.md(
         f"""
         # 🚀 RAG Tutor — Notebook 3: Common Improvements for Production
@@ -89,7 +94,6 @@ def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
         {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
         """
     )
-    return
 
 
 @app.cell
@@ -150,7 +154,11 @@ def _(
     _mode_lbl = (
         "Pure BM25 Lexical"
         if hybrid_alpha_slider.value == 0.0
-        else ("Pure Vector Semantic" if hybrid_alpha_slider.value == 1.0 else f"Balanced Hybrid (α={hybrid_alpha_slider.value:.1f})")
+        else (
+            "Pure Vector Semantic"
+            if hybrid_alpha_slider.value == 1.0
+            else f"Balanced Hybrid (α={hybrid_alpha_slider.value:.1f})"
+        )
     )
     if _hybrid_results:
         _top = _hybrid_results[0]
@@ -205,7 +213,6 @@ def _(
         {_rows}
         """
     )
-    return
 
 
 @app.cell
@@ -215,7 +222,9 @@ def _(mo):
         label="Test Query for Stage-2 Cross-Encoder Reranking:",
         full_width=True,
     )
-    rerank_top_k = mo.ui.slider(1, 6, step=1, value=3, label="Final Top K after Reranking:")
+    rerank_top_k = mo.ui.slider(
+        1, 6, step=1, value=3, label="Final Top K after Reranking:"
+    )
     rerank_inspect_slot = mo.ui.dropdown(
         options={
             "Inspect Stage-2 Rank #1 (Top Promoted Answer)": 0,
@@ -270,9 +279,13 @@ def _(
     _rerank_rows = []
     for _item in _reranked:
         if _item.rank_delta > 0:
-            _shift_badge = f"🟢 **+{_item.rank_delta} Promoted** (was #{_item.stage1_rank})"
+            _shift_badge = (
+                f"🟢 **+{_item.rank_delta} Promoted** (was #{_item.stage1_rank})"
+            )
         elif _item.rank_delta < 0:
-            _shift_badge = f"🔴 **{_item.rank_delta} Demoted** (was #{_item.stage1_rank})"
+            _shift_badge = (
+                f"🔴 **{_item.rank_delta} Demoted** (was #{_item.stage1_rank})"
+            )
         else:
             _shift_badge = f"⚪ **Unchanged** (#{_item.stage1_rank})"
         _rerank_rows.append(
@@ -300,7 +313,6 @@ def _(
         {chr(10).join(_rerank_rows)}
         """
     )
-    return
 
 
 @app.cell
@@ -368,7 +380,7 @@ def _(
 
         ### Step 1 & 2: Sub-Query Planner & Iterative Retrieval
         - **Multi-Hop Detected**: `{_trace.is_multi_hop}` · **Planned Sub-Queries ({len(_trace.planned_sub_queries)})**: {", ".join(f"`{html.escape(sq)}`" for sq in _trace.planned_sub_queries)}
-        - **Sufficiency Audit**: {'✅ Passed' if _trace.sufficiency_passed else '⚠️ Low Confidence'} — _{html.escape(_trace.sufficiency_note)}_
+        - **Sufficiency Audit**: {"✅ Passed" if _trace.sufficiency_passed else "⚠️ Low Confidence"} — _{html.escape(_trace.sufficiency_note)}_
 
         | Step | Sub-Query Executed | Planner Reason | Top Reranked Evidence | Cross-Encoder Score |
         | :--- | :--- | :--- | :--- | :--- |
@@ -383,7 +395,6 @@ def _(
         {mo.accordion({"🌳 Inspect Raw AgenticTrace Object (`mo.tree`)": _trace_tree})}
         """
     )
-    return
 
 
 if __name__ == "__main__":

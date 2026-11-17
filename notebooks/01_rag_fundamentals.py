@@ -10,6 +10,7 @@ def _():
     import math
     import sys
     from pathlib import Path
+
     import marimo as mo
 
     _repo_root = Path(__file__).resolve().parents[1]
@@ -70,7 +71,11 @@ def _(llm_client, mo):
 
 @app.cell
 def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
-    _badge = "🟢 **Llama.app Connected**" if is_online else "🟡 **Offline Educational Fallback Active**"
+    _badge = (
+        "🟢 **Llama.app Connected**"
+        if is_online
+        else "🟡 **Offline Educational Fallback Active**"
+    )
     _overview_mermaid = mo.mermaid(
         """
         flowchart LR
@@ -101,7 +106,6 @@ def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
         {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
         """
     )
-    return
 
 
 @app.cell
@@ -191,7 +195,6 @@ def _(
         {mo.hstack([_no_rag_card, _with_rag_card], widths="equal", gap=2)}
         """
     )
-    return
 
 
 @app.cell
@@ -223,9 +226,13 @@ def _(
     _norm_b = vector_norm(_b)
     _cos = cosine_similarity(_a, _b)
     _clamped = max(-1.0, min(1.0, _cos))
-    _angle_deg = math.degrees(math.acos(_clamped)) if (_norm_a > 0 and _norm_b > 0) else 0.0
+    _angle_deg = (
+        math.degrees(math.acos(_clamped)) if (_norm_a > 0 and _norm_b > 0) else 0.0
+    )
 
-    _compass_html = render_2d_compass_svg(_a, _b, _dot, _norm_a, _norm_b, _cos, _angle_deg)
+    _compass_html = render_2d_compass_svg(
+        _a, _b, _dot, _norm_a, _norm_b, _cos, _angle_deg
+    )
 
     _stat_cards = mo.hstack(
         [
@@ -272,7 +279,6 @@ def _(
         {mo.Html(_compass_html)}
         """
     )
-    return
 
 
 @app.cell
@@ -347,7 +353,9 @@ def _(
 
     _barcode_html = ""
     if _retrieved:
-        _sel_chunk, _sel_score = _retrieved[min(inspect_rank_dropdown.value, len(_retrieved) - 1)]
+        _sel_chunk, _sel_score = _retrieved[
+            min(inspect_rank_dropdown.value, len(_retrieved) - 1)
+        ]
         _sel_vec = ev_embedding_map.get(_sel_chunk) or embedder.embed(_sel_chunk)
         _barcode_html = render_embedding_barcode_svg(
             query_vec=_q_vec,
@@ -411,7 +419,6 @@ def _(
         **Next Up**: In `notebooks/02_chunking_and_duckdb.py`, we'll visually explore document chunking & sliding overlap on a **Document Timeline Minimap** and index our vectors into **DuckDB**!
         """
     )
-    return
 
 
 if __name__ == "__main__":

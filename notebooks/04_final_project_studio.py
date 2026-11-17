@@ -1,7 +1,9 @@
 import marimo
 
 __generated_with = "0.10.0"
-app = marimo.App(width="medium", app_title="RAG Tutor 04: Capstone Final Project Studio")
+app = marimo.App(
+    width="medium", app_title="RAG Tutor 04: Capstone Final Project Studio"
+)
 
 
 @app.cell
@@ -10,6 +12,7 @@ def _():
     import html
     import sys
     from pathlib import Path
+
     import marimo as mo
 
     _repo_root = Path(__file__).resolve().parents[1]
@@ -91,7 +94,10 @@ def _(mo):
     )
 
     chunk_strategy_ctl = mo.ui.dropdown(
-        options={"Markdown Section-Aware": "markdown", "Fixed-Character Window": "fixed"},
+        options={
+            "Markdown Section-Aware": "markdown",
+            "Fixed-Character Window": "fixed",
+        },
         value="Markdown Section-Aware",
         label="Chunking Strategy:",
     )
@@ -166,14 +172,19 @@ def _(
 
     _combined = [
         *base_corpus,
-        *(dataclasses.replace(_c, chunk_id=len(base_corpus) + _i + 1) for _i, _c in enumerate(_custom_chunks)),
+        *(
+            dataclasses.replace(_c, chunk_id=len(base_corpus) + _i + 1)
+            for _i, _c in enumerate(_custom_chunks)
+        ),
     ]
 
     _scratch_db = SimpleVectorDB()
     _scratch_db.index_chunks([_c.text for _c in _combined], embedder.embed)
     _query_clean = studio_query_input.value.strip()
     _q_vec = embedder.embed(_query_clean)
-    _baseline_hits = _scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value) if _query_clean else []
+    _baseline_hits = (
+        _scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value) if _query_clean else []
+    )
     _base_sys, _base_usr = build_rag_prompt(_query_clean, _baseline_hits)
     _base_ans = llm_client.generate(
         system_prompt=_base_sys,
@@ -198,7 +209,11 @@ def _(
             )
             _prod_answer = _trace.final_answer
             _prod_chunks = [
-                (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rerank_score, c.text)
+                (
+                    f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
+                    c.rerank_score,
+                    c.text,
+                )
                 for c in _trace.final_context_chunks
             ]
             _prod_meta = (
@@ -212,14 +227,24 @@ def _(
                 alpha=hybrid_alpha_ctl.value,
             )
             if use_reranker_ctl.value:
-                _s2 = _reranker.rerank(studio_query_input.value, _s1, top_k=top_k_ctl.value)
+                _s2 = _reranker.rerank(
+                    studio_query_input.value, _s1, top_k=top_k_ctl.value
+                )
                 _prod_chunks = [
-                    (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rerank_score, c.text)
+                    (
+                        f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
+                        c.rerank_score,
+                        c.text,
+                    )
                     for c in _s2
                 ]
             else:
                 _prod_chunks = [
-                    (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rrf_score, c.text)
+                    (
+                        f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
+                        c.rrf_score,
+                        c.text,
+                    )
                     for c in _s1[: top_k_ctl.value]
                 ]
             _prod_sys, _prod_usr = build_rag_prompt(
@@ -307,7 +332,9 @@ def _(
             ),
             "🏗️ Live Pipeline B Architecture Diagram": mo.vstack(
                 [
-                    mo.md("Toggle the switches above to watch the active production pipeline rewire live:"),
+                    mo.md(
+                        "Toggle the switches above to watch the active production pipeline rewire live:"
+                    ),
                     _pipeline_mermaid,
                 ]
             ),
@@ -315,7 +342,11 @@ def _(
         }
     )
 
-    _badge = "🟢 **Llama.app Connected**" if is_online else "🟡 **Offline Educational Fallback Active**"
+    _badge = (
+        "🟢 **Llama.app Connected**"
+        if is_online
+        else "🟡 **Offline Educational Fallback Active**"
+    )
 
     mo.md(
         f"""
@@ -351,7 +382,6 @@ def _(
         3. **Challenge 3 (Multi-Hop Synthesis)**: Enable **Agentic Multi-Hop & Verification** and ask a question that combines a fact from your custom runbook with a fact from `02_duckdb_vectors.md`.
         """
     )
-    return
 
 
 if __name__ == "__main__":

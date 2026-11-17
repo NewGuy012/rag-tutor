@@ -1,7 +1,9 @@
 import marimo
 
 __generated_with = "0.10.0"
-app = marimo.App(width="medium", app_title="RAG Tutor 05: Advanced Graph, Hybrid & Modular RAG")
+app = marimo.App(
+    width="medium", app_title="RAG Tutor 05: Advanced Graph, Hybrid & Modular RAG"
+)
 
 
 @app.cell
@@ -9,6 +11,7 @@ def _():
     import html
     import sys
     from pathlib import Path
+
     import marimo as mo
 
     _repo_root = Path(__file__).resolve().parents[1]
@@ -76,8 +79,20 @@ def _(llm_client, mo):
 
 
 @app.cell
-def _(corpus_chunks, graph_store, is_online, mo, model_dropdown, status_msg, thinking_toggle):
-    _badge = "🟢 **Llama.app Connected**" if is_online else "🟡 **Offline Educational Fallback Active**"
+def _(
+    corpus_chunks,
+    graph_store,
+    is_online,
+    mo,
+    model_dropdown,
+    status_msg,
+    thinking_toggle,
+):
+    _badge = (
+        "🟢 **Llama.app Connected**"
+        if is_online
+        else "🟡 **Offline Educational Fallback Active**"
+    )
     mo.md(
         f"""
         # 🕸️ RAG Tutor — Notebook 5: Advanced Graph, Hybrid & Modular RAG
@@ -97,7 +112,6 @@ def _(corpus_chunks, graph_store, is_online, mo, model_dropdown, status_msg, thi
         {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
         """
     )
-    return
 
 
 @app.cell
@@ -107,7 +121,10 @@ def _(metadata_vals, mo):
         label="Stage 1 Parallel Retrieval Query:",
         full_width=True,
     )
-    dept_options = {"All Departments": "all", **{d: d for d in metadata_vals["departments"]}}
+    dept_options = {
+        "All Departments": "all",
+        **{d: d for d in metadata_vals["departments"]},
+    }
     dept_filter = mo.ui.dropdown(
         options=dept_options,
         value="All Departments",
@@ -157,24 +174,36 @@ def _(
         min_year=min_year_filter.value,
     )
 
-    _dense_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
-        for i, r in enumerate(_dense_hits)
-    ) or "| — | — | — | _Enter a query to search_ |"
-    _sparse_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.3f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
-        for i, r in enumerate(_sparse_hits)
-    ) or "| — | — | — | _Enter a query to search_ |"
+    _dense_rows = (
+        "\n".join(
+            f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
+            for i, r in enumerate(_dense_hits)
+        )
+        or "| — | — | — | _Enter a query to search_ |"
+    )
+    _sparse_rows = (
+        "\n".join(
+            f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.3f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
+            for i, r in enumerate(_sparse_hits)
+        )
+        or "| — | — | — | _Enter a query to search_ |"
+    )
     _graph_svg = render_subgraph_traversal_svg(_graph_res)
-    _triple_rows = "\n".join(
-        f"| **{hop}-hop** | `{html.escape(t.subject).replace('|', '\\|')}` | `--[{html.escape(t.predicate).replace('|', '\\|')}]-->` | `{html.escape(t.obj).replace('|', '\\|')}` | Chunk #{t.source_chunk_id} (`{html.escape(t.doc_source)}`) |"
-        for t, hop in _graph_res.matched_triples
-    ) or "| — | _No triples matched_ | — | — | — |"
+    _triple_rows = (
+        "\n".join(
+            f"| **{hop}-hop** | `{html.escape(t.subject).replace('|', '\\|')}` | `--[{html.escape(t.predicate).replace('|', '\\|')}]-->` | `{html.escape(t.obj).replace('|', '\\|')}` | Chunk #{t.source_chunk_id} (`{html.escape(t.doc_source)}`) |"
+            for t, hop in _graph_res.matched_triples
+        )
+        or "| — | _No triples matched_ | — | — | — |"
+    )
 
-    _sql_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{html.escape(r.department)}` | `{r.updated_year}` | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > {html.escape(r.section_title).replace('|', '\\|')} |"
-        for i, r in enumerate(_filtered_hits)
-    ) or "| — | — | _No rows matched SQL filter_ | — | — | — |"
+    _sql_rows = (
+        "\n".join(
+            f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{html.escape(r.department)}` | `{r.updated_year}` | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > {html.escape(r.section_title).replace('|', '\\|')} |"
+            for i, r in enumerate(_filtered_hits)
+        )
+        or "| — | — | _No rows matched SQL filter_ | — | — | — |"
+    )
 
     _tabs = mo.ui.tabs(
         {
@@ -244,7 +273,6 @@ def _(
         {_tabs}
         """
     )
-    return
 
 
 @app.cell
@@ -289,9 +317,15 @@ def _(
     _alpha = fusion_alpha_slider.value
     _k = fusion_rrf_k_slider.value
 
-    _rrf_res = hybrid_engine.search(_q, top_k=6, alpha=_alpha, rrf_k=_k, fusion_method="rrf")
-    _conv_res = hybrid_engine.search(_q, top_k=6, alpha=_alpha, rrf_k=_k, fusion_method="convex")
-    _fusion_svg = render_fusion_comparison_svg(_rrf_res, _conv_res, alpha=_alpha, rrf_k=_k)
+    _rrf_res = hybrid_engine.search(
+        _q, top_k=6, alpha=_alpha, rrf_k=_k, fusion_method="rrf"
+    )
+    _conv_res = hybrid_engine.search(
+        _q, top_k=6, alpha=_alpha, rrf_k=_k, fusion_method="convex"
+    )
+    _fusion_svg = render_fusion_comparison_svg(
+        _rrf_res, _conv_res, alpha=_alpha, rrf_k=_k
+    )
 
     _conv_rows = "\n".join(
         f"| **#{r.final_rank}** | Chunk #{r.chunk_id} | `{r.vector_score:.3f}` → **`{r.norm_vector_score:.3f}`** | `{r.bm25_score:.2f}` → **`{r.norm_bm25_score:.3f}`** | **`{r.convex_score:.4f}`** | `{r.rrf_score:.5f}` | `{html.escape(r.doc_source)}` > {html.escape(r.section_title).replace('|', '\\|')} |"
@@ -316,7 +350,6 @@ def _(
         {_conv_rows}
         """
     )
-    return
 
 
 @app.cell
@@ -343,10 +376,19 @@ def _(metadata_vals, mo):
         value="Weighted Linear / Convex Combination",
         label="Score Fusion Strategy:",
     )
-    modular_alpha_ctl = mo.ui.slider(0.0, 1.0, step=0.1, value=0.7, label="Dense ↔ Sparse α:")
-    modular_enable_graph_ctl = mo.ui.switch(value=True, label="Enable Knowledge Graph Traversal")
-    modular_rerank_ctl = mo.ui.switch(value=True, label="Enable Stage-2 Cross-Encoder Reranking")
-    _dept_opts = {"All Departments": "all", **{d: d for d in metadata_vals["departments"]}}
+    modular_alpha_ctl = mo.ui.slider(
+        0.0, 1.0, step=0.1, value=0.7, label="Dense ↔ Sparse α:"
+    )
+    modular_enable_graph_ctl = mo.ui.switch(
+        value=True, label="Enable Knowledge Graph Traversal"
+    )
+    modular_rerank_ctl = mo.ui.switch(
+        value=True, label="Enable Stage-2 Cross-Encoder Reranking"
+    )
+    _dept_opts = {
+        "All Departments": "all",
+        **{d: d for d in metadata_vals["departments"]},
+    }
     modular_dept_ctl = mo.ui.dropdown(
         options=_dept_opts,
         value="All Departments",
@@ -410,7 +452,10 @@ def _(
         _exp_block = mo.callout(
             mo.md(
                 "**Multi-Query Variations Executed**:\n"
-                + "\n".join(f"{i + 1}. `{html.escape(q)}`" for i, q in enumerate(_trace.expansion.expanded_queries))
+                + "\n".join(
+                    f"{i + 1}. `{html.escape(q)}`"
+                    for i, q in enumerate(_trace.expansion.expanded_queries)
+                )
             ),
             kind="info",
         )
@@ -425,10 +470,13 @@ def _(
     else:
         _exp_block = mo.md("_Direct query mode active (no query expansion applied)._")
 
-    _cand_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{c.chunk_id} | {', '.join(f'`{html.escape(s)}`' for s in c.sources)} | `{c.combined_score:.4f}` | {f'`{c.rerank_score:.4f}`' if c.rerank_score is not None else '_Bypassed_'} | `{html.escape(c.doc_source)}` > **{html.escape(c.section_title).replace('|', '\\|')}** |"
-        for i, c in enumerate(_trace.final_candidates)
-    ) or "| — | — | — | — | — | _No candidates retrieved_ |"
+    _cand_rows = (
+        "\n".join(
+            f"| **#{i + 1}** | Chunk #{c.chunk_id} | {', '.join(f'`{html.escape(s)}`' for s in c.sources)} | `{c.combined_score:.4f}` | {f'`{c.rerank_score:.4f}`' if c.rerank_score is not None else '_Bypassed_'} | `{html.escape(c.doc_source)}` > **{html.escape(c.section_title).replace('|', '\\|')}** |"
+            for i, c in enumerate(_trace.final_candidates)
+        )
+        or "| — | — | — | — | — | _No candidates retrieved_ |"
+    )
 
     mo.md(
         f"""
@@ -456,7 +504,6 @@ def _(
         {mo.callout(mo.md(html.escape(_trace.final_answer)), kind="success")}
         """
     )
-    return
 
 
 @app.cell
@@ -480,7 +527,6 @@ def _(mo):
     - **Adding a Cross-Encoder Reranker**:
       - Use broad Stage-1 recall (`Top 25–50` chunks) across your parallel engines, then pass those pairs into a Cross-Encoder (such as `BAAI/bge-reranker-v2-m3`, `ms-marco-MiniLM-L-6-v2`, or **Cohere Rerank**) to filter cleanly down to the **Top 3–5** passages.
     """)
-    return
 
 
 if __name__ == "__main__":
