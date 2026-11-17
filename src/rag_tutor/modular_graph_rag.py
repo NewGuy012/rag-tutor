@@ -1,23 +1,17 @@
-"""Advanced Graph, Hybrid, and Modular RAG Pipeline.
-
-Implements the three stages of modern Hybrid & Modular RAG architectures:
-1. Pre-Retrieval Query Expansion (`Multi-Query` and `HyDE`).
-2. Parallel Retrieval (`Dense + Sparse`, `Vector + Knowledge Graph`, `Vector + SQL Filters`).
-3. Score Fusion (`RRF` vs. `Convex Combination`) and Post-Retrieval `Cross-Encoder` Reranking.
-"""
+"""Advanced Graph, Hybrid, and Modular RAG Pipeline."""
 
 from __future__ import annotations
 
 import re
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Literal
 
 from .chunker import Chunk
 from .duckdb_store import DuckDBVectorStore
-from .hybrid_search import HybridSearchEngine, HybridSearchResult
+from .hybrid_search import HybridSearchEngine
 from .llm_backend import LlamaMacOSClient, get_default_client, get_default_embedder, tokenize
-from .reranker import CrossEncoderReranker, RerankedCandidate
+from .reranker import CrossEncoderReranker
 
 ExpansionMode = Literal["none", "multi_query", "hyde"]
 FusionMethod = Literal["rrf", "convex"]
@@ -137,7 +131,6 @@ class KnowledgeGraphStore:
     """Lightweight Knowledge Graph built from corpus chunks for Vector + Graph RAG."""
 
     def __init__(self, chunks: list[Chunk]) -> None:
-        self.chunks_by_id: dict[int, Chunk] = {c.chunk_id: c for c in chunks}
         self.triples: list[KnowledgeTriple] = []
         self._adj: dict[str, list[tuple[str, KnowledgeTriple]]] = defaultdict(list)
         self._build_from_chunks(chunks)
@@ -290,48 +283,56 @@ class QueryExpander:
             return self._expand_hyde(cleaned, model=model)
         raise ValueError(f"Unsupported expansion mode {mode!r}")
 
+    def _generate_if_online(
+        self,
+        system_prompt: str,
+        query: str,
+        model: str | None,
+        max_tokens: int,
+    ) -> str | None:
+        if not model or model == "educational-fallback":
+            return None
+        res = self.llm_client.generate(
+            system_prompt=system_prompt,
+            user_prompt=query,
+            model=model,
+            max_tokens=max_tokens,
+        )
+        return res.content.strip() if res.backend == "llama-macos" else None
+
     def _expand_multi_query(
         self,
         query: str,
         model: str | None = None,
     ) -> QueryExpansionResult:
+        content = self._generate_if_online(
+            "Rewrite the user question into 3 concise search query variations covering "
+            "different synonyms and exact technical terms. Return one query per line.",
+            query,
+            model,
+            max_tokens=160,
+        )
         used_llm = False
         variations: list[str] = []
-        if model and model != "educational-fallback":
-            res = self.llm_client.generate(
-                system_prompt=(
-                    "Rewrite the user question into 3 concise search query variations covering "
-                    "different synonyms and exact technical terms. Return one query per line."
-                ),
-                user_prompt=query,
-                model=model,
-                max_tokens=160,
-                retrieved_context=None,
-            )
-            if res.backend == "llama-macos":
-                used_llm = True
-                for line in res.content.splitlines():
-                    item = re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", line).strip()
-                    if len(item) >= 8 and item.lower() != query.lower():
-                        variations.append(item)
+        if content:
+            used_llm = True
+            for line in content.splitlines():
+                item = re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", line).strip()
+                if len(item) >= 8 and item.lower() != query.lower():
+                    variations.append(item)
 
         if not variations:
-            tokens = tokenize(query, stem=False, drop_stopwords=True)
-            key_terms = " ".join(tokens[:6]) or query
+            key_terms = " ".join(tokenize(query, stem=False, drop_stopwords=True)[:6]) or query
             variations = [
                 f"{key_terms} architecture workflow and pipeline stages",
                 f"exact technical terms and configuration for {key_terms}",
                 f"comparison and tuning best practices for {key_terms}",
             ]
 
-        unique_queries = [query]
-        for v in variations:
-            if v not in unique_queries:
-                unique_queries.append(v)
         return QueryExpansionResult(
             mode="multi_query",
             original_query=query,
-            expanded_queries=unique_queries[:4],
+            expanded_queries=list(dict.fromkeys([query, *variations]))[:4],
             used_llm=used_llm,
         )
 
@@ -340,27 +341,18 @@ class QueryExpander:
         query: str,
         model: str | None = None,
     ) -> QueryExpansionResult:
-        used_llm = False
-        hypo = ""
-        if model and model != "educational-fallback":
-            res = self.llm_client.generate(
-                system_prompt=(
-                    "Write a concise, factual 2-sentence technical passage that directly answers "
-                    "the user's question as if excerpted from an engineering reference manual."
-                ),
-                user_prompt=query,
-                model=model,
-                max_tokens=180,
-                retrieved_context=None,
-            )
-            if res.backend == "llama-macos" and len(res.content.strip()) >= 20:
-                used_llm = True
-                hypo = res.content.strip()
-
-        if not hypo:
+        content = self._generate_if_online(
+            "Write a concise, factual 2-sentence technical passage that directly answers "
+            "the user's question as if excerpted from an engineering reference manual.",
+            query,
+            model,
+            max_tokens=180,
+        )
+        used_llm = bool(content and len(content) >= 20)
+        if not used_llm:
             tokens = tokenize(query, stem=False, drop_stopwords=True)
             focus = ", ".join(tokens[:6]) if tokens else query
-            hypo = (
+            content = (
                 f"In production RAG architectures addressing {focus}, systems pair dense vector "
                 "similarity search with lexical BM25 keyword scoring, optional Knowledge Graph "
                 "traversal, and SQL metadata filtering. Candidate lists are merged via Reciprocal "
@@ -372,7 +364,7 @@ class QueryExpander:
             mode="hyde",
             original_query=query,
             expanded_queries=[query],
-            hypothetical_doc=hypo,
+            hypothetical_doc=content or "",
             used_llm=used_llm,
         )
 
@@ -431,12 +423,19 @@ class ModularRAGPipeline:
             else None
         )
 
-        # Stage 1 & 2: Dense + Sparse retrieval across expanded queries
         candidates_by_id: dict[int, ModularCandidate] = {}
         multi_query_rrf: dict[int, float] = defaultdict(float)
+        queries = expansion.expanded_queries or [query]
+        is_multi = len(queries) > 1
 
         if cfg.enable_dense_sparse:
-            for q_idx, q_variant in enumerate(expansion.expanded_queries or [query]):
+            base_sources = [
+                *(["HyDE-Dense" if hyde_vec is not None else "Dense"] if cfg.alpha > 0.0 else []),
+                *(["BM25"] if cfg.alpha < 1.0 else []),
+                *(["SQL-Filter"] if (cfg.department and cfg.department != "all") or cfg.min_year is not None else []),
+                *(["Multi-Query"] if is_multi else []),
+            ]
+            for q_idx, q_variant in enumerate(queries):
                 hits = self.hybrid_engine.search(
                     query=q_variant,
                     top_k=cfg.stage1_k,
@@ -448,18 +447,9 @@ class ModularRAGPipeline:
                     query_vec=hyde_vec if q_idx == 0 else None,
                 )
                 for rank_pos, h in enumerate(hits):
-                    # When multiple queries run, combine per-query rankings smoothly
-                    if len(expansion.expanded_queries) > 1:
+                    if is_multi:
                         multi_query_rrf[h.chunk_id] += 1.0 / (cfg.rrf_k + rank_pos + 1)
-                    existing = candidates_by_id.get(h.chunk_id)
-                    if existing is None:
-                        srcs = []
-                        if cfg.alpha > 0.0:
-                            srcs.append("HyDE-Dense" if hyde_vec is not None else "Dense")
-                        if cfg.alpha < 1.0:
-                            srcs.append("BM25")
-                        if (cfg.department and cfg.department != "all") or cfg.min_year is not None:
-                            srcs.append("SQL-Filter")
+                    if h.chunk_id not in candidates_by_id:
                         candidates_by_id[h.chunk_id] = ModularCandidate(
                             chunk_id=h.chunk_id,
                             doc_source=h.doc_source,
@@ -471,17 +461,14 @@ class ModularRAGPipeline:
                             graph_bonus=0.0,
                             combined_score=h.fusion_score,
                             rerank_score=None,
-                            sources=srcs,
+                            sources=list(base_sources),
                         )
 
-            if len(expansion.expanded_queries) > 1:
+            if is_multi:
                 for cid, cand in candidates_by_id.items():
                     cand.base_fusion_score = round(multi_query_rrf[cid], 6)
                     cand.combined_score = cand.base_fusion_score
-                    if "Multi-Query" not in cand.sources:
-                        cand.sources.append("Multi-Query")
 
-        # Parallel Graph traversal (respecting SQL metadata filters if enabled)
         graph_result = (
             self.graph_store.search(query, max_hops=2)
             if cfg.enable_graph
@@ -489,10 +476,7 @@ class ModularRAGPipeline:
         )
 
         if cfg.enable_graph and graph_result.chunk_scores:
-            peak_base = max(
-                (c.base_fusion_score for c in candidates_by_id.values()),
-                default=0.0,
-            )
+            peak_base = max((c.base_fusion_score for c in candidates_by_id.values()), default=0.0)
             bonus_scale = peak_base if peak_base > 0.0 else 1.0
             for cid, g_score in graph_result.chunk_scores.items():
                 ch = self.chunks_by_id.get(cid)
@@ -524,40 +508,19 @@ class ModularRAGPipeline:
             candidates_by_id.values(),
             key=lambda c: (c.combined_score, -c.chunk_id),
             reverse=True,
-        )[: cfg.stage1_k]
+        )[: max(1, int(cfg.stage1_k))]
 
-        # Stage 3: Post-Retrieval Cross-Encoder Reranking
+        final_k = max(1, int(cfg.final_top_k))
         if cfg.use_reranker and stage1_candidates:
-            pseudo_s1 = [
-                HybridSearchResult(
-                    chunk_id=c.chunk_id,
-                    doc_source=c.doc_source,
-                    section_title=c.section_title,
-                    text=c.text,
-                    vector_score=0.0,
-                    vector_rank=idx + 1,
-                    bm25_score=0.0,
-                    bm25_rank=idx + 1,
-                    rrf_score=c.combined_score,
-                    final_rank=idx + 1,
-                )
-                for idx, c in enumerate(stage1_candidates)
-            ]
-            reranked: list[RerankedCandidate] = self.reranker.rerank(
-                query, pseudo_s1, top_k=len(pseudo_s1)
-            )
-            rerank_map = {r.chunk_id: r.rerank_score for r in reranked}
-            final_candidates: list[ModularCandidate] = []
-            for r in reranked[: cfg.final_top_k]:
-                orig = candidates_by_id[r.chunk_id]
-                orig.rerank_score = r.rerank_score
-                final_candidates.append(orig)
-            # Keep scores visible on stage1 items too
             for c in stage1_candidates:
-                if c.chunk_id in rerank_map:
-                    c.rerank_score = rerank_map[c.chunk_id]
+                c.rerank_score, _ = self.reranker.score_pair(query, c.text)
+            final_candidates = sorted(
+                stage1_candidates,
+                key=lambda c: (c.rerank_score or 0.0, c.combined_score),
+                reverse=True,
+            )[:final_k]
         else:
-            final_candidates = stage1_candidates[: cfg.final_top_k]
+            final_candidates = stage1_candidates[:final_k]
 
         context_lines = [
             f"[Chunk #{c.chunk_id} | {c.doc_source} > {c.section_title} | sources={','.join(c.sources)}]\n{c.text}"

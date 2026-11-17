@@ -224,10 +224,10 @@ class AgenticRAGPipeline:
     ) -> tuple[list[ClaimVerification], float]:
         """Audit each claim sentence in `answer_text` against `context_chunks`."""
         lines = [
-            line.strip(" -*")
+            cleaned
             for line in split_sentences(answer_text, min_len=20)
-            if len(line.strip(" -*")) >= 20
-            and not line.lower().startswith("based strictly on")
+            if len(cleaned := line.strip(" -*")) >= 20
+            and not cleaned.lower().startswith("based strictly on")
         ]
         if not lines:
             return [], 1.0
