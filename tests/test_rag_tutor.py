@@ -131,7 +131,8 @@ class TestRAGTutor(unittest.TestCase):
         rrf_hits = self.hybrid.search("CONVEX-ALPHA-70", top_k=5, alpha=0.7, fusion_method="rrf")
         conv_hits = self.hybrid.search("CONVEX-ALPHA-70", top_k=5, alpha=0.7, fusion_method="convex")
         self.assertTrue(all(0.0 <= h.norm_vector_score <= 1.0 and 0.0 <= h.norm_bm25_score <= 1.0 for h in conv_hits))
-        self.assertEqual(conv_hits[0].fusion_method, "convex")
+        self.assertEqual(conv_hits[0].fusion_score, conv_hits[0].convex_score)
+        self.assertEqual(rrf_hits[0].fusion_score, rrf_hits[0].rrf_score)
         self.assertEqual(self.reranker.rerank("CONVEX-ALPHA-70", conv_hits[:1], top_k=1)[0].stage1_score, conv_hits[0].convex_score)
         self.assertIn("<svg", render_fusion_comparison_svg(rrf_hits, conv_hits, 0.7, 60))
 
