@@ -121,7 +121,7 @@ class TestRAGTutor(unittest.TestCase):
     def test_metadata_filtering_and_convex_fusion(self) -> None:
         meta = self.store.list_metadata_values()
         self.assertIn("advanced-architecture", meta["departments"])
-        filtered = self.store.search_vector_filtered(
+        filtered = self.store.search_vector(
             "Convex Combination and HyDE",
             top_k=4,
             department="advanced-architecture",

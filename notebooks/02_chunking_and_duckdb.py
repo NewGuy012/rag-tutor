@@ -334,7 +334,6 @@ def _(
             chunk_text VARCHAR,
             char_length INTEGER,
             department VARCHAR,
-            author VARCHAR,
             updated_year INTEGER,
             embedding FLOAT[{embedder.dim}]
         );

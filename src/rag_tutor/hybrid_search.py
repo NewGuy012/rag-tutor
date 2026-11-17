@@ -57,7 +57,6 @@ class HybridSearchEngine:
         fusion_method: str = "rrf",
         department: str | None = None,
         min_year: int | None = None,
-        doc_source: str | None = None,
         query_vec: list[float] | None = None,
     ) -> list[HybridSearchResult]:
         """Execute Hybrid Search with RRF (`rrf`) or Normalized Convex Combination (`convex`)."""
@@ -72,12 +71,11 @@ class HybridSearchEngine:
         alpha = max(0.0, min(1.0, float(alpha)))
         rrf_k = max(1, int(rrf_k))
 
-        vec_results = self.store.search_vector_filtered(
+        vec_results = self.store.search_vector(
             query=query,
             top_k=total_chunks,
             department=department,
             min_year=min_year,
-            doc_source=doc_source,
             query_vec=query_vec,
         )
         bm25_results = self.store.search_bm25(
@@ -85,7 +83,6 @@ class HybridSearchEngine:
             top_k=total_chunks,
             department=department,
             min_year=min_year,
-            doc_source=doc_source,
         )
         if not vec_results:
             return []

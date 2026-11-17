@@ -170,7 +170,7 @@ def _(
     _dense_hits = store.search_vector(_q, top_k=5)
     _sparse_hits = store.search_bm25(_q, top_k=5)
     _graph_res = graph_store.search(_q, max_hops=graph_hops_ctl.value)
-    _filtered_hits = store.search_vector_filtered(
+    _filtered_hits = store.search_vector(
         _q,
         top_k=5,
         department=dept_filter.value,

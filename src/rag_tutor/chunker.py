@@ -8,21 +8,18 @@ from pathlib import Path
 
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$")
 
-_DOC_METADATA_DEFAULTS: dict[str, tuple[str, str, int]] = {
-    "01_rag_fundamentals.md": ("foundations", "core-curriculum", 2024),
-    "02_duckdb_vectors.md": ("storage-engineering", "data-platform", 2025),
-    "03_production_rag_patterns.md": ("ml-production", "retrieval-team", 2025),
-    "04_advanced_graph_modular_rag.md": ("advanced-architecture", "graph-modular-team", 2026),
-    "custom_runbook.md": ("operations", "oncall-sre", 2026),
+_DOC_METADATA_DEFAULTS: dict[str, tuple[str, int]] = {
+    "01_rag_fundamentals.md": ("foundations", 2024),
+    "02_duckdb_vectors.md": ("storage-engineering", 2025),
+    "03_production_rag_patterns.md": ("ml-production", 2025),
+    "04_advanced_graph_modular_rag.md": ("advanced-architecture", 2026),
+    "custom_runbook.md": ("operations", 2026),
 }
 
 
-def infer_doc_metadata(doc_source: str) -> tuple[str, str, int]:
-    """Return `(department, author, updated_year)` metadata for a document source."""
-    return _DOC_METADATA_DEFAULTS.get(
-        Path(doc_source).name,
-        ("general", "rag-tutor", 2026),
-    )
+def infer_doc_metadata(doc_source: str) -> tuple[str, int]:
+    """Return `(department, updated_year)` metadata for a document source."""
+    return _DOC_METADATA_DEFAULTS.get(Path(doc_source).name, ("general", 2026))
 
 
 @dataclass
@@ -37,7 +34,6 @@ class Chunk:
     end_char: int
     overlap_chars: int = 0
     department: str = "general"
-    author: str = "rag-tutor"
     updated_year: int = 2026
 
     @property
@@ -77,9 +73,8 @@ def chunk_fixed_character(
 
     chunks: list[Chunk] = []
     start = 0
-    chunk_id = 1
     n = len(cleaned)
-    department, author, updated_year = infer_doc_metadata(doc_source)
+    department, updated_year = infer_doc_metadata(doc_source)
 
     while start < n:
         end = min(start + chunk_size, n)
@@ -90,21 +85,20 @@ def chunk_fixed_character(
 
         snippet = cleaned[start:end].strip()
         if len(snippet) >= 15:
+            cid = len(chunks) + 1
             chunks.append(
                 Chunk(
-                    chunk_id=chunk_id,
+                    chunk_id=cid,
                     doc_source=doc_source,
-                    section_title=f"Window #{chunk_id} ({start}..{end})",
+                    section_title=f"Window #{cid} ({start}..{end})",
                     text=snippet,
                     start_char=start,
                     end_char=end,
-                    overlap_chars=chunk_overlap if chunk_id > 1 else 0,
+                    overlap_chars=chunk_overlap if cid > 1 else 0,
                     department=department,
-                    author=author,
                     updated_year=updated_year,
                 )
             )
-            chunk_id += 1
 
         if end >= n:
             break
@@ -119,76 +113,47 @@ def chunk_markdown_sections(
     chunk_overlap: int = 80,
     doc_source: str = "document.md",
 ) -> list[Chunk]:
-    """Split Markdown by headings (`#`, `##`, `###`) and subdivide long sections."""
+    """Split Markdown by `#`..`###` headings and subdivide long sections."""
     sections: list[tuple[str, str, int, int]] = []
-    current_title = "Introduction"
-    buffer: list[str] = []
-    sec_start = 0
-    cursor = 0
-
-    for line in text.splitlines(keepends=True):
-        heading_match = _HEADING_RE.match(line.strip())
-        if heading_match and buffer:
-            sec_text = "".join(buffer).strip()
+    title, buf, sec_start, cursor = "Introduction", [], 0, 0
+    for line in [*text.splitlines(keepends=True), None]:
+        m = _HEADING_RE.match(line.strip()) if line is not None else None
+        if buf and (line is None or m):
+            sec_text = "".join(buf).strip()
             if len(sec_text) >= 15:
-                sections.append((current_title, sec_text, sec_start, cursor))
-            current_title = heading_match.group(2).strip()
-            buffer = [line]
-            sec_start = cursor
-        else:
-            if heading_match:
-                current_title = heading_match.group(2).strip()
-            buffer.append(line)
-        cursor += len(line)
-
-    if buffer:
-        sec_text = "".join(buffer).strip()
-        if len(sec_text) >= 15:
-            sections.append((current_title, sec_text, sec_start, cursor))
+                sections.append((title, sec_text, sec_start, cursor))
+            buf, sec_start = [], cursor
+        if line is not None:
+            if m:
+                title = m.group(2).strip()
+            buf.append(line)
+            cursor += len(line)
 
     chunks: list[Chunk] = []
-    chunk_id = 1
-    department, author, updated_year = infer_doc_metadata(doc_source)
+    department, updated_year = infer_doc_metadata(doc_source)
     for sec_title, sec_text, s_start, s_end in sections:
         if len(sec_text) <= max_chunk_size:
             chunks.append(
                 Chunk(
-                    chunk_id=chunk_id,
+                    chunk_id=len(chunks) + 1,
                     doc_source=doc_source,
                     section_title=sec_title,
                     text=sec_text,
                     start_char=s_start,
                     end_char=s_end,
-                    overlap_chars=0,
                     department=department,
-                    author=author,
                     updated_year=updated_year,
                 )
             )
-            chunk_id += 1
         else:
-            sub_chunks = chunk_fixed_character(
-                sec_text,
-                chunk_size=max_chunk_size,
-                chunk_overlap=chunk_overlap,
-                doc_source=doc_source,
-            )
-            for idx, sc in enumerate(sub_chunks):
-                chunks.append(
-                    Chunk(
-                        chunk_id=chunk_id,
-                        doc_source=doc_source,
-                        section_title=f"{sec_title} (Part {idx + 1})",
-                        text=sc.text,
-                        start_char=s_start + sc.start_char,
-                        end_char=s_start + sc.end_char,
-                        overlap_chars=sc.overlap_chars,
-                        department=department,
-                        author=author,
-                        updated_year=updated_year,
-                    )
-                )
-                chunk_id += 1
+            for idx, sc in enumerate(
+                chunk_fixed_character(sec_text, max_chunk_size, chunk_overlap, doc_source)
+            ):
+                sc.chunk_id = len(chunks) + 1
+                sc.section_title = f"{sec_title} (Part {idx + 1})"
+                sc.start_char += s_start
+                sc.end_char += s_start
+                chunks.append(sc)
 
     return chunks
 

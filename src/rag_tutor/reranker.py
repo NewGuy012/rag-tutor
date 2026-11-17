@@ -108,7 +108,7 @@ class CrossEncoderReranker:
                     section_title=cand.section_title,
                     text=cand.text,
                     stage1_rank=s1_rank,
-                    stage1_score=cand.rrf_score,
+                    stage1_score=cand.fusion_score,
                     rerank_score=ce_score,
                     stage2_rank=0,
                     rank_delta=0,
