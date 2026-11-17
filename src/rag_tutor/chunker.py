@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+MIN_CHUNK_CHARS = 15
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$")
 
 _DOC_METADATA_DEFAULTS: dict[str, tuple[str, int]] = {
@@ -50,8 +51,7 @@ def extract_markdown_headings(text: str) -> list[tuple[int, str]]:
     headings: list[tuple[int, str]] = []
     cursor = 0
     for line in text.splitlines(keepends=True):
-        m = _HEADING_RE.match(line.strip())
-        if m:
+        if m := _HEADING_RE.match(line.strip()):
             headings.append((cursor, m.group(2).strip()))
         cursor += len(line)
     return headings
@@ -67,34 +67,36 @@ def chunk_fixed_character(
     chunk_size = max(60, int(chunk_size))
     chunk_overlap = max(0, min(int(chunk_overlap), chunk_size - 20))
 
-    cleaned = text.strip()
-    if not cleaned:
+    if not text.strip():
         return []
 
     chunks: list[Chunk] = []
-    start = 0
-    n = len(cleaned)
+    start, n = 0, len(text)
     department, updated_year = infer_doc_metadata(doc_source)
 
     while start < n:
         end = min(start + chunk_size, n)
         if end < n:
-            ws_pos = cleaned.rfind(" ", start + int(chunk_size * 0.6), end)
+            ws_pos = text.rfind(" ", start + int(chunk_size * 0.6), end)
             if ws_pos != -1:
                 end = ws_pos
 
-        snippet = cleaned[start:end].strip()
-        if len(snippet) >= 15:
+        raw_slice = text[start:end]
+        snippet = raw_slice.strip()
+        if len(snippet) >= MIN_CHUNK_CHARS:
+            lead = len(raw_slice) - len(raw_slice.lstrip())
+            c_start = start + lead
+            c_end = c_start + len(snippet)
             cid = len(chunks) + 1
             chunks.append(
                 Chunk(
                     chunk_id=cid,
                     doc_source=doc_source,
-                    section_title=f"Window #{cid} ({start}..{end})",
+                    section_title=f"Window #{cid} ({c_start}..{c_end})",
                     text=snippet,
-                    start_char=start,
-                    end_char=end,
-                    overlap_chars=chunk_overlap if cid > 1 else 0,
+                    start_char=c_start,
+                    end_char=c_end,
+                    overlap_chars=max(0, chunks[-1].end_char - c_start) if chunks else 0,
                     department=department,
                     updated_year=updated_year,
                 )
@@ -102,7 +104,7 @@ def chunk_fixed_character(
 
         if end >= n:
             break
-        start = max(start + 1, end - chunk_overlap)
+        start = end if not snippet else max(start + 1, end - chunk_overlap)
 
     return chunks
 
@@ -119,9 +121,12 @@ def chunk_markdown_sections(
     for line in [*text.splitlines(keepends=True), None]:
         m = _HEADING_RE.match(line.strip()) if line is not None else None
         if buf and (line is None or m):
-            sec_text = "".join(buf).strip()
-            if len(sec_text) >= 15:
-                sections.append((title, sec_text, sec_start, cursor))
+            raw_sec = "".join(buf)
+            sec_text = raw_sec.strip()
+            if len(sec_text) >= MIN_CHUNK_CHARS:
+                lead = len(raw_sec) - len(raw_sec.lstrip())
+                c_start = sec_start + lead
+                sections.append((title, sec_text, c_start, c_start + len(sec_text)))
             buf, sec_start = [], cursor
         if line is not None:
             if m:
@@ -168,17 +173,13 @@ def chunk_document(
     """Dispatch document chunking by strategy (`'markdown'` or `'fixed'`)."""
     if strategy == "fixed":
         return chunk_fixed_character(
-            text,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            doc_source=doc_source,
+            text, chunk_size=chunk_size, chunk_overlap=chunk_overlap, doc_source=doc_source
         )
-    return chunk_markdown_sections(
-        text,
-        max_chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        doc_source=doc_source,
-    )
+    if strategy == "markdown":
+        return chunk_markdown_sections(
+            text, max_chunk_size=chunk_size, chunk_overlap=chunk_overlap, doc_source=doc_source
+        )
+    raise ValueError(f"Unsupported chunking strategy {strategy!r}; expected 'markdown' or 'fixed'.")
 
 
 def load_sample_markdown_corpus(
@@ -196,14 +197,13 @@ def load_sample_markdown_corpus(
 
     all_chunks: list[Chunk] = []
     for md_path in sorted(corpus_path.glob("*.md")):
-        doc_chunks = chunk_document(
+        for ch in chunk_document(
             md_path.read_text(encoding="utf-8"),
             strategy=strategy,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             doc_source=md_path.name,
-        )
-        for ch in doc_chunks:
+        ):
             ch.chunk_id = len(all_chunks) + 1
             all_chunks.append(ch)
     return all_chunks

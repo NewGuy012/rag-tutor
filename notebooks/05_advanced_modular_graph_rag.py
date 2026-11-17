@@ -64,21 +64,15 @@ def _():
 
 @app.cell
 def _(llm_client, mo):
-    is_online, discovered_models, status_msg = llm_client.check_health()
-    _opts = [m.id for m in discovered_models] if discovered_models else ["educational-fallback"]
+    is_online, _models, status_msg = llm_client.check_health()
+    _opts = _models or ["educational-fallback"]
     model_dropdown = mo.ui.dropdown(
         options=_opts,
         value=_opts[0],
         label="Llama.app Model (`/v1/models`):",
     )
     thinking_toggle = mo.ui.switch(value=False, label="Enable Thinking")
-    return (
-        discovered_models,
-        is_online,
-        model_dropdown,
-        status_msg,
-        thinking_toggle,
-    )
+    return is_online, model_dropdown, status_msg, thinking_toggle
 
 
 @app.cell
