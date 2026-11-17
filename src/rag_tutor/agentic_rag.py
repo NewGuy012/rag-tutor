@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from .hybrid_search import HybridSearchEngine
 from .llm_backend import LlamaMacOSClient, get_default_client, split_sentences
 from .reranker import CrossEncoderReranker, RerankedCandidate
+from .scratch_rag import build_rag_prompt
 
 
 @dataclass
@@ -21,7 +22,6 @@ class SubQueryStep:
     top_doc_source: str
     top_section: str
     rerank_score: float
-    snippet: str
 
 
 @dataclass
@@ -46,7 +46,6 @@ class AgenticTrace:
     sufficiency_note: str
     final_context_chunks: list[RerankedCandidate]
     final_answer: str
-    llm_backend_used: str
     llm_model_used: str
     latency_ms: float
     verifications: list[ClaimVerification] = field(default_factory=list)
@@ -75,6 +74,8 @@ class AgenticRAGPipeline:
     def decompose_query(self, query: str) -> tuple[bool, list[str]]:
         """Decompose a complex or multi-part user query into targeted sub-queries."""
         cleaned = query.strip()
+        if not cleaned:
+            return False, []
         parts: list[str] = []
         if "?" in cleaned[:-1]:
             parts = [p.strip() + "?" for p in cleaned.split("?") if p.strip()]
@@ -84,10 +85,7 @@ class AgenticRAGPipeline:
                 for p in _MULTI_HOP_PATTERN.split(cleaned)
                 if len(p.strip(" ,?.")) >= 8
             ]
-
-        if len(parts) >= 2:
-            return True, parts[:3]
-        return False, [cleaned]
+        return (True, parts[:3]) if len(parts) >= 2 else (False, [cleaned])
 
     def _retrieve_step(
         self,
@@ -99,9 +97,7 @@ class AgenticRAGPipeline:
         collected_by_id: dict[int, RerankedCandidate],
         display_query: str | None = None,
     ) -> SubQueryStep | None:
-        s1_results = self.hybrid_engine.search(
-            sub_query, top_k=stage1_candidates, alpha=alpha
-        )
+        s1_results = self.hybrid_engine.search(sub_query, top_k=stage1_candidates, alpha=alpha)
         reranked = self.reranker.rerank(sub_query, s1_results, top_k=2)
         if not reranked:
             return None
@@ -118,7 +114,6 @@ class AgenticRAGPipeline:
             top_doc_source=best.doc_source,
             top_section=best.section_title,
             rerank_score=best.rerank_score,
-            snippet=best.text[:160] + ("..." if len(best.text) > 160 else ""),
         )
 
     def run(
@@ -130,16 +125,27 @@ class AgenticRAGPipeline:
         final_top_k: int = 3,
     ) -> AgenticTrace:
         """Execute the Agentic RAG workflow and return a full `AgenticTrace`."""
-        is_multi_hop, sub_queries = self.decompose_query(query)
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            return AgenticTrace(
+                original_query="",
+                is_multi_hop=False,
+                planned_sub_queries=[],
+                retrieval_steps=[],
+                sufficiency_passed=False,
+                sufficiency_note="Empty query skipped.",
+                final_context_chunks=[],
+                final_answer="Please enter a question to query the RAG pipeline.",
+                llm_model_used="educational-fallback",
+                latency_ms=0.0,
+            )
+
+        is_multi_hop, sub_queries = self.decompose_query(cleaned_query)
         retrieval_steps: list[SubQueryStep] = []
         collected_by_id: dict[int, RerankedCandidate] = {}
 
         for idx, sq in enumerate(sub_queries):
-            reason = (
-                f"Sub-query #{idx + 1} from multi-hop planner"
-                if is_multi_hop
-                else "Primary direct lookup"
-            )
+            reason = f"Sub-query #{idx + 1} from multi-hop planner" if is_multi_hop else "Primary direct lookup"
             step = self._retrieve_step(
                 sq, reason, 0.5, stage1_candidates, len(retrieval_steps) + 1, collected_by_id
             )
@@ -148,7 +154,7 @@ class AgenticRAGPipeline:
 
         max_score = max((s.rerank_score for s in retrieval_steps), default=0.0)
         if max_score < 0.55:
-            expanded_query = re.sub(r"[^\w\s-]", " ", query).strip()
+            expanded_query = re.sub(r"[^\w\s-]", " ", cleaned_query).strip()
             retry_step = self._retrieve_step(
                 expanded_query,
                 "Initial confidence < 0.55; triggered BM25-weighted iterative retry",
@@ -178,31 +184,22 @@ class AgenticRAGPipeline:
             reverse=True,
         )[: max(1, final_top_k, len(sub_queries))]
 
-        context_block = "\n\n".join(
+        context_blocks = [
             f"[Chunk #{c.chunk_id} | {c.doc_source} > {c.section_title} | score={c.rerank_score:.3f}]\n{c.text}"
             for c in final_chunks
-        )
-        system_prompt = (
-            "You are an expert RAG Tutor assistant.\n"
-            "Answer the user's question using ONLY the verified context chunks below. "
-            "Cite the chunk numbers (e.g., [Chunk #2]) for every factual claim you make.\n\n"
-            f"VERIFIED CONTEXT:\n{context_block}"
-        )
-
+        ]
+        system_prompt, user_prompt = build_rag_prompt(cleaned_query, context_blocks, cite_chunks=True)
         gen_result = self.llm_client.generate(
             system_prompt=system_prompt,
-            user_prompt=query,
+            user_prompt=user_prompt,
             model=model,
             enable_thinking=enable_thinking,
             retrieved_context=[c.text for c in final_chunks],
         )
-
-        verifications, faith_score = self.verify_response(
-            gen_result.content, final_chunks
-        )
+        verifications, faith_score = self.verify_response(gen_result.content, final_chunks)
 
         return AgenticTrace(
-            original_query=query,
+            original_query=cleaned_query,
             is_multi_hop=is_multi_hop,
             planned_sub_queries=sub_queries,
             retrieval_steps=retrieval_steps,
@@ -210,7 +207,6 @@ class AgenticRAGPipeline:
             sufficiency_note=sufficiency_note,
             final_context_chunks=final_chunks,
             final_answer=gen_result.content,
-            llm_backend_used=gen_result.backend,
             llm_model_used=gen_result.model,
             latency_ms=gen_result.latency_ms,
             verifications=verifications,
@@ -252,5 +248,4 @@ class AgenticRAGPipeline:
             )
 
         grounded_count = sum(1 for v in verifications if v.is_grounded)
-        faithfulness = round(grounded_count / len(verifications), 3)
-        return verifications, faithfulness
+        return verifications, round(grounded_count / len(verifications), 3)

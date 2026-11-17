@@ -9,9 +9,10 @@ from typing import Callable, Literal
 
 from .chunker import Chunk
 from .duckdb_store import DuckDBVectorStore
-from .hybrid_search import HybridSearchEngine
+from .hybrid_search import HybridSearchEngine, HybridSearchResult
 from .llm_backend import LlamaMacOSClient, get_default_client, get_default_embedder, tokenize
 from .reranker import CrossEncoderReranker
+from .scratch_rag import build_rag_prompt
 
 ExpansionMode = Literal["none", "multi_query", "hyde"]
 FusionMethod = Literal["rrf", "convex"]
@@ -52,7 +53,6 @@ class KnowledgeTriple:
     obj: str
     source_chunk_id: int
     doc_source: str
-    section_title: str
 
 
 @dataclass
@@ -69,10 +69,8 @@ class QueryExpansionResult:
     """Expanded queries and optional HyDE hypothetical passage."""
 
     mode: ExpansionMode
-    original_query: str
     expanded_queries: list[str]
     hypothetical_doc: str = ""
-    used_llm: bool = False
 
 
 @dataclass
@@ -101,10 +99,7 @@ class ModularCandidate:
     doc_source: str
     section_title: str
     text: str
-    department: str
-    updated_year: int
     base_fusion_score: float
-    graph_bonus: float
     combined_score: float
     rerank_score: float | None
     sources: list[str]
@@ -112,18 +107,13 @@ class ModularCandidate:
 
 @dataclass
 class ModularRAGTrace:
-    """Full execution trace across pre-retrieval, parallel retrieval, fusion, and refinement."""
+    """Execution trace across pre-retrieval, parallel retrieval, fusion, and refinement."""
 
-    query: str
-    config: ModularRAGConfig
     expansion: QueryExpansionResult
     graph_result: GraphSearchResult
-    sql_filter_preview: str
-    stage1_candidates: list[ModularCandidate]
     final_candidates: list[ModularCandidate]
     final_answer: str
     llm_model_used: str
-    llm_backend_used: str
     latency_ms: float
 
 
@@ -135,19 +125,18 @@ class KnowledgeGraphStore:
         self._adj: dict[str, list[tuple[str, KnowledgeTriple]]] = defaultdict(list)
         self._build_from_chunks(chunks)
 
-    def _find_best_chunk(self, chunks: list[Chunk], keywords: tuple[str, ...]) -> Chunk | None:
-        if not chunks:
-            return None
+    @staticmethod
+    def _find_best_chunk(chunks: list[Chunk], keywords: tuple[str, ...]) -> Chunk | None:
         kw_set = {k.lower() for k in keywords}
-        best_chunk = chunks[0]
-        best_hits = -1
+        best_chunk: Chunk | None = None
+        best_hits = 0
         for ch in chunks:
             text_low = f"{ch.section_title} {ch.text}".lower()
             hits = sum(1 for kw in kw_set if kw in text_low)
             if hits > best_hits:
                 best_hits = hits
                 best_chunk = ch
-        return best_chunk if best_hits > 0 else chunks[0]
+        return best_chunk
 
     def _add_triple(self, triple: KnowledgeTriple, seen: set[tuple[str, str, str]]) -> None:
         key = (triple.subject.lower(), triple.predicate.lower(), triple.obj.lower())
@@ -163,17 +152,9 @@ class KnowledgeGraphStore:
             return
         seen: set[tuple[str, str, str]] = set()
         for subj, pred, obj, kws in _CANONICAL_TRIPLES:
-            ch = self._find_best_chunk(chunks, kws)
-            if ch is not None:
+            if ch := self._find_best_chunk(chunks, kws):
                 self._add_triple(
-                    KnowledgeTriple(
-                        subject=subj,
-                        predicate=pred,
-                        obj=obj,
-                        source_chunk_id=ch.chunk_id,
-                        doc_source=ch.doc_source,
-                        section_title=ch.section_title,
-                    ),
+                    KnowledgeTriple(subj, pred, obj, ch.chunk_id, ch.doc_source),
                     seen,
                 )
 
@@ -182,12 +163,11 @@ class KnowledgeGraphStore:
             for subj, pred, obj in _EXPLICIT_TRIPLE_RE.findall(ch.text):
                 self._add_triple(
                     KnowledgeTriple(
-                        subject=subj.strip(),
-                        predicate=pred.strip().replace(" ", "_"),
-                        obj=obj.strip(),
-                        source_chunk_id=ch.chunk_id,
-                        doc_source=ch.doc_source,
-                        section_title=ch.section_title,
+                        subj.strip(),
+                        pred.strip().replace(" ", "_"),
+                        obj.strip(),
+                        ch.chunk_id,
+                        ch.doc_source,
                     ),
                     seen,
                 )
@@ -199,6 +179,8 @@ class KnowledgeGraphStore:
         max_triples: int = 12,
     ) -> GraphSearchResult:
         """Find entity seeds matching `query` and traverse up to `max_hops` graph edges."""
+        if not query.strip():
+            return GraphSearchResult([], [], {})
         max_hops = max(1, min(3, int(max_hops)))
         q_lower = query.lower()
         q_tokens = set(tokenize(query, stem=True, drop_stopwords=True))
@@ -207,18 +189,16 @@ class KnowledgeGraphStore:
         for entity in self._adj:
             e_lower = entity.lower()
             e_tokens = set(tokenize(entity, stem=True, drop_stopwords=True))
-            overlap = len(q_tokens & e_tokens)
-            exact_phrase = 2.5 if len(e_lower) >= 3 and e_lower in q_lower else 0.0
-            score = exact_phrase + overlap
+            score = (2.5 if len(e_lower) >= 3 and e_lower in q_lower else 0.0) + len(q_tokens & e_tokens)
             if score > 0.0:
                 entity_scores.append((score, entity))
 
         entity_scores.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
         seed_entities = [ent for _, ent in entity_scores[:4]]
         if not seed_entities:
-            return GraphSearchResult(seed_entities=[], matched_triples=[], chunk_scores={})
+            return GraphSearchResult([], [], {})
 
-        visited_entities: dict[str, int] = {seed: 0 for seed in seed_entities}
+        visited_entities = {seed: 0 for seed in seed_entities}
         queue: deque[tuple[str, int]] = deque((seed, 0) for seed in seed_entities)
         matched_triples: list[tuple[KnowledgeTriple, int]] = []
         seen_triples: set[tuple[str, str, str]] = set()
@@ -234,8 +214,7 @@ class KnowledgeGraphStore:
                 if t_key not in seen_triples:
                     seen_triples.add(t_key)
                     matched_triples.append((triple, next_hop))
-                    hop_weight = 1.0 if next_hop == 1 else 0.45
-                    raw_chunk_scores[triple.source_chunk_id] += hop_weight
+                    raw_chunk_scores[triple.source_chunk_id] += 1.0 if next_hop == 1 else 0.45
                 if neighbor not in visited_entities:
                     visited_entities[neighbor] = next_hop
                     queue.append((neighbor, next_hop))
@@ -245,15 +224,9 @@ class KnowledgeGraphStore:
 
         peak = max(raw_chunk_scores.values(), default=0.0)
         norm_chunk_scores = (
-            {cid: round(sc / peak, 4) for cid, sc in raw_chunk_scores.items()}
-            if peak > 0.0
-            else {}
+            {cid: round(sc / peak, 4) for cid, sc in raw_chunk_scores.items()} if peak > 0.0 else {}
         )
-        return GraphSearchResult(
-            seed_entities=seed_entities,
-            matched_triples=matched_triples,
-            chunk_scores=norm_chunk_scores,
-        )
+        return GraphSearchResult(seed_entities, matched_triples, norm_chunk_scores)
 
 
 class QueryExpander:
@@ -271,12 +244,7 @@ class QueryExpander:
         """Expand `query` using `'none'`, `'multi_query'`, or `'hyde'`."""
         cleaned = query.strip()
         if mode == "none" or not cleaned:
-            return QueryExpansionResult(
-                mode="none",
-                original_query=cleaned,
-                expanded_queries=[cleaned] if cleaned else [],
-            )
-
+            return QueryExpansionResult("none", [cleaned] if cleaned else [])
         if mode == "multi_query":
             return self._expand_multi_query(cleaned, model=model)
         if mode == "hyde":
@@ -297,14 +265,11 @@ class QueryExpander:
             user_prompt=query,
             model=model,
             max_tokens=max_tokens,
+            retrieved_context=[],
         )
         return res.content.strip() if res.backend == "llama-macos" else None
 
-    def _expand_multi_query(
-        self,
-        query: str,
-        model: str | None = None,
-    ) -> QueryExpansionResult:
+    def _expand_multi_query(self, query: str, model: str | None = None) -> QueryExpansionResult:
         content = self._generate_if_online(
             "Rewrite the user question into 3 concise search query variations covering "
             "different synonyms and exact technical terms. Return one query per line.",
@@ -312,10 +277,8 @@ class QueryExpander:
             model,
             max_tokens=160,
         )
-        used_llm = False
         variations: list[str] = []
         if content:
-            used_llm = True
             for line in content.splitlines():
                 item = re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", line).strip()
                 if len(item) >= 8 and item.lower() != query.lower():
@@ -331,16 +294,10 @@ class QueryExpander:
 
         return QueryExpansionResult(
             mode="multi_query",
-            original_query=query,
             expanded_queries=list(dict.fromkeys([query, *variations]))[:4],
-            used_llm=used_llm,
         )
 
-    def _expand_hyde(
-        self,
-        query: str,
-        model: str | None = None,
-    ) -> QueryExpansionResult:
+    def _expand_hyde(self, query: str, model: str | None = None) -> QueryExpansionResult:
         content = self._generate_if_online(
             "Write a concise, factual 2-sentence technical passage that directly answers "
             "the user's question as if excerpted from an engineering reference manual.",
@@ -348,8 +305,7 @@ class QueryExpander:
             model,
             max_tokens=180,
         )
-        used_llm = bool(content and len(content) >= 20)
-        if not used_llm:
+        if not content or len(content) < 20:
             tokens = tokenize(query, stem=False, drop_stopwords=True)
             focus = ", ".join(tokens[:6]) if tokens else query
             content = (
@@ -360,13 +316,25 @@ class QueryExpander:
                 "Cross-Encoder reranker refines the final top chunks for grounded LLM synthesis."
             )
 
-        return QueryExpansionResult(
-            mode="hyde",
-            original_query=query,
-            expanded_queries=[query],
-            hypothetical_doc=content or "",
-            used_llm=used_llm,
-        )
+        return QueryExpansionResult(mode="hyde", expanded_queries=[query], hypothetical_doc=content)
+
+
+def _make_candidate(
+    src: HybridSearchResult | Chunk,
+    base_fusion_score: float,
+    combined_score: float,
+    sources: list[str],
+) -> ModularCandidate:
+    return ModularCandidate(
+        chunk_id=src.chunk_id,
+        doc_source=src.doc_source,
+        section_title=src.section_title,
+        text=src.text,
+        base_fusion_score=base_fusion_score,
+        combined_score=combined_score,
+        rerank_score=None,
+        sources=list(sources),
+    )
 
 
 class ModularRAGPipeline:
@@ -392,7 +360,8 @@ class ModularRAGPipeline:
         self.expander = expander or QueryExpander(self.llm_client)
         self.embed_fn = embed_fn or get_default_embedder().embed
 
-    def _chunk_passes_filters(self, chunk: Chunk, config: ModularRAGConfig) -> bool:
+    @staticmethod
+    def _chunk_passes_filters(chunk: Chunk, config: ModularRAGConfig) -> bool:
         if config.department and config.department != "all" and chunk.department != config.department:
             return False
         if config.min_year is not None and chunk.updated_year < int(config.min_year):
@@ -408,15 +377,18 @@ class ModularRAGPipeline:
     ) -> ModularRAGTrace:
         """Execute the configured Modular RAG pipeline and return a full trace."""
         cfg = config or ModularRAGConfig()
-        expansion = self.expander.expand(query, mode=cfg.expansion_mode, model=model)
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            return ModularRAGTrace(
+                expansion=QueryExpansionResult("none", []),
+                graph_result=GraphSearchResult([], [], {}),
+                final_candidates=[],
+                final_answer="Please enter a question to query the Modular RAG pipeline.",
+                llm_model_used="educational-fallback",
+                latency_ms=0.0,
+            )
 
-        sql_preview, sql_params = self.store.build_filtered_vector_sql(
-            department=cfg.department,
-            min_year=cfg.min_year,
-        )
-        if sql_params:
-            sql_preview = f"{sql_preview}\n-- Filter params: {sql_params!r}"
-
+        expansion = self.expander.expand(cleaned_query, mode=cfg.expansion_mode, model=model)
         hyde_vec = (
             self.embed_fn(expansion.hypothetical_doc)
             if expansion.mode == "hyde" and expansion.hypothetical_doc
@@ -424,8 +396,8 @@ class ModularRAGPipeline:
         )
 
         candidates_by_id: dict[int, ModularCandidate] = {}
-        multi_query_rrf: dict[int, float] = defaultdict(float)
-        queries = expansion.expanded_queries or [query]
+        multi_scores: dict[int, float] = defaultdict(float)
+        queries = expansion.expanded_queries or [cleaned_query]
         is_multi = len(queries) > 1
 
         if cfg.enable_dense_sparse:
@@ -448,31 +420,25 @@ class ModularRAGPipeline:
                 )
                 for rank_pos, h in enumerate(hits):
                     if is_multi:
-                        multi_query_rrf[h.chunk_id] += 1.0 / (cfg.rrf_k + rank_pos + 1)
+                        multi_scores[h.chunk_id] += (
+                            1.0 / (cfg.rrf_k + rank_pos + 1)
+                            if cfg.fusion_method == "rrf"
+                            else h.fusion_score / len(queries)
+                        )
                     if h.chunk_id not in candidates_by_id:
-                        candidates_by_id[h.chunk_id] = ModularCandidate(
-                            chunk_id=h.chunk_id,
-                            doc_source=h.doc_source,
-                            section_title=h.section_title,
-                            text=h.text,
-                            department=h.department,
-                            updated_year=h.updated_year,
-                            base_fusion_score=h.fusion_score,
-                            graph_bonus=0.0,
-                            combined_score=h.fusion_score,
-                            rerank_score=None,
-                            sources=list(base_sources),
+                        candidates_by_id[h.chunk_id] = _make_candidate(
+                            h, h.fusion_score, h.fusion_score, base_sources
                         )
 
             if is_multi:
                 for cid, cand in candidates_by_id.items():
-                    cand.base_fusion_score = round(multi_query_rrf[cid], 6)
+                    cand.base_fusion_score = round(multi_scores[cid], 6)
                     cand.combined_score = cand.base_fusion_score
 
         graph_result = (
-            self.graph_store.search(query, max_hops=2)
+            self.graph_store.search(cleaned_query, max_hops=2)
             if cfg.enable_graph
-            else GraphSearchResult(seed_entities=[], matched_triples=[], chunk_scores={})
+            else GraphSearchResult([], [], {})
         )
 
         if cfg.enable_graph and graph_result.chunk_scores:
@@ -485,21 +451,8 @@ class ModularRAGPipeline:
                 bonus = round(cfg.graph_weight * g_score * bonus_scale, 6)
                 cand = candidates_by_id.get(cid)
                 if cand is None:
-                    candidates_by_id[cid] = ModularCandidate(
-                        chunk_id=ch.chunk_id,
-                        doc_source=ch.doc_source,
-                        section_title=ch.section_title,
-                        text=ch.text,
-                        department=ch.department,
-                        updated_year=ch.updated_year,
-                        base_fusion_score=0.0,
-                        graph_bonus=bonus,
-                        combined_score=bonus,
-                        rerank_score=None,
-                        sources=["Knowledge-Graph"],
-                    )
+                    candidates_by_id[cid] = _make_candidate(ch, 0.0, bonus, ["Knowledge-Graph"])
                 else:
-                    cand.graph_bonus = bonus
                     cand.combined_score = round(cand.base_fusion_score + bonus, 6)
                     if "Knowledge-Graph" not in cand.sources:
                         cand.sources.append("Knowledge-Graph")
@@ -513,7 +466,7 @@ class ModularRAGPipeline:
         final_k = max(1, int(cfg.final_top_k))
         if cfg.use_reranker and stage1_candidates:
             for c in stage1_candidates:
-                c.rerank_score, _ = self.reranker.score_pair(query, c.text)
+                c.rerank_score, _ = self.reranker.score_pair(cleaned_query, c.text)
             final_candidates = sorted(
                 stage1_candidates,
                 key=lambda c: (c.rerank_score or 0.0, c.combined_score),
@@ -522,7 +475,7 @@ class ModularRAGPipeline:
         else:
             final_candidates = stage1_candidates[:final_k]
 
-        context_lines = [
+        context_blocks = [
             f"[Chunk #{c.chunk_id} | {c.doc_source} > {c.section_title} | sources={','.join(c.sources)}]\n{c.text}"
             for c in final_candidates
         ]
@@ -531,31 +484,22 @@ class ModularRAGPipeline:
                 f"({t.subject} --[{t.predicate}]--> {t.obj})"
                 for t, _ in graph_result.matched_triples[:6]
             )
-            context_lines.append(f"[Knowledge Graph Facts]\n{triple_summary}")
+            context_blocks.append(f"[Knowledge Graph Facts]\n{triple_summary}")
 
-        system_prompt = (
-            "You are an expert RAG Tutor assistant.\n"
-            "Answer the user's question concisely using ONLY the retrieved context and graph facts below.\n\n"
-            + "\n\n".join(context_lines)
-        )
+        system_prompt, user_prompt = build_rag_prompt(cleaned_query, context_blocks)
         gen = self.llm_client.generate(
             system_prompt=system_prompt,
-            user_prompt=query,
+            user_prompt=user_prompt,
             model=model,
             enable_thinking=enable_thinking,
             retrieved_context=[c.text for c in final_candidates],
         )
 
         return ModularRAGTrace(
-            query=query,
-            config=cfg,
             expansion=expansion,
             graph_result=graph_result,
-            sql_filter_preview=sql_preview,
-            stage1_candidates=stage1_candidates,
             final_candidates=final_candidates,
             final_answer=gen.content,
             llm_model_used=gen.model,
-            llm_backend_used=gen.backend,
             latency_ms=gen.latency_ms,
         )
