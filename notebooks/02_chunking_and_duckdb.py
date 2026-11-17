@@ -16,20 +16,19 @@ def _():
     if str(_src_dir) not in sys.path:
         sys.path.insert(0, str(_src_dir))
 
-    from rag_tutor.chunker import (
+    from rag_tutor import (
+        DuckDBVectorStore,
         chunk_document,
+        get_default_embedder,
         load_sample_markdown_corpus,
+        render_chunk_timeline_svg,
     )
-    from rag_tutor.duckdb_store import DuckDBVectorStore
-    from rag_tutor.llm_backend import get_default_embedder
-    from rag_tutor.visualizations import render_chunk_timeline_svg
 
     sample_docs_dir = _repo_root / "data" / "sample_docs"
     doc_files = {p.name: p.read_text(encoding="utf-8") for p in sorted(sample_docs_dir.glob("*.md"))}
     embedder = get_default_embedder()
     return (
         DuckDBVectorStore,
-        Path,
         chunk_document,
         doc_files,
         embedder,
@@ -198,7 +197,6 @@ def _(
     DuckDBVectorStore,
     chunk_overlap_slider,
     chunk_size_slider,
-    embedder,
     load_sample_markdown_corpus,
     sample_docs_dir,
     strategy_selector,
@@ -209,11 +207,7 @@ def _(
         chunk_size=chunk_size_slider.value,
         chunk_overlap=chunk_overlap_slider.value,
     )
-    duck_store = DuckDBVectorStore(
-        db_path=":memory:",
-        embedding_dim=embedder.dim,
-        embed_fn=embedder.embed,
-    )
+    duck_store = DuckDBVectorStore()
     indexed_count = duck_store.index_chunks(corpus_chunks)
     return corpus_chunks, duck_store, indexed_count
 

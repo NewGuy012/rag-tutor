@@ -15,30 +15,25 @@ def _():
     if str(_src_dir) not in sys.path:
         sys.path.insert(0, str(_src_dir))
 
-    from rag_tutor.agentic_rag import AgenticRAGPipeline
-    from rag_tutor.chunker import load_sample_markdown_corpus
-    from rag_tutor.duckdb_store import DuckDBVectorStore
-    from rag_tutor.hybrid_search import HybridSearchEngine
-    from rag_tutor.llm_backend import get_default_client, get_default_embedder
-    from rag_tutor.reranker import CrossEncoderReranker
-    from rag_tutor.visualizations import (
+    from rag_tutor import (
+        AgenticRAGPipeline,
+        CrossEncoderReranker,
+        DuckDBVectorStore,
+        HybridSearchEngine,
         build_agentic_mermaid_diagram,
+        get_default_client,
+        load_sample_markdown_corpus,
         render_cross_attention_heatmap_svg,
         render_faithfulness_audit_svg,
         render_hybrid_rrf_svg,
         render_rerank_slopegraph_svg,
     )
 
-    embedder = get_default_embedder()
     llm_client = get_default_client()
     corpus_chunks = load_sample_markdown_corpus(
         strategy="markdown", chunk_size=480, chunk_overlap=70
     )
-    store = DuckDBVectorStore(
-        db_path=":memory:",
-        embedding_dim=embedder.dim,
-        embed_fn=embedder.embed,
-    )
+    store = DuckDBVectorStore()
     store.index_chunks(corpus_chunks)
     hybrid_engine = HybridSearchEngine(store)
     reranker = CrossEncoderReranker()
@@ -48,14 +43,8 @@ def _():
         llm_client=llm_client,
     )
     return (
-        AgenticRAGPipeline,
-        CrossEncoderReranker,
-        DuckDBVectorStore,
-        HybridSearchEngine,
         agentic_pipeline,
         build_agentic_mermaid_diagram,
-        corpus_chunks,
-        embedder,
         hybrid_engine,
         llm_client,
         mo,
@@ -64,7 +53,6 @@ def _():
         render_hybrid_rrf_svg,
         render_rerank_slopegraph_svg,
         reranker,
-        store,
     )
 
 

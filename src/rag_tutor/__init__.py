@@ -1,40 +1,29 @@
 """RAG Tutor: Interactive educational toolkit for Retrieval-Augmented Generation."""
 
-from .scratch_rag import (
-    dot_product,
-    vector_norm,
-    cosine_similarity,
-    SimpleVectorDB,
-    load_ev_facts,
-    build_rag_prompt,
-)
+from .agentic_rag import AgenticRAGPipeline
+from .chunker import chunk_document, load_sample_markdown_corpus
+from .duckdb_store import DuckDBVectorStore
+from .hybrid_search import HybridSearchEngine
 from .llm_backend import (
     LlamaMacOSClient,
     LocalEmbeddingEngine,
     get_default_client,
     get_default_embedder,
 )
-from .chunker import (
-    Chunk,
-    chunk_document,
-    chunk_fixed_character,
-    chunk_markdown_sections,
-    load_sample_markdown_corpus,
-)
-from .duckdb_store import DuckDBVectorStore
-from .hybrid_search import HybridSearchEngine, HybridSearchResult
-from .reranker import CrossEncoderReranker, RerankedCandidate
-from .agentic_rag import AgenticRAGPipeline, AgenticTrace
 from .modular_graph_rag import (
-    GraphSearchResult,
     KnowledgeGraphStore,
-    KnowledgeTriple,
-    ModularCandidate,
     ModularRAGConfig,
     ModularRAGPipeline,
-    ModularRAGTrace,
     QueryExpander,
-    QueryExpansionResult,
+)
+from .reranker import CrossEncoderReranker
+from .scratch_rag import (
+    SimpleVectorDB,
+    build_rag_prompt,
+    cosine_similarity,
+    dot_product,
+    load_ev_facts,
+    vector_norm,
 )
 from .visualizations import (
     build_agentic_mermaid_diagram,
@@ -54,40 +43,28 @@ from .visualizations import (
 )
 
 __all__ = [
-    "dot_product",
-    "vector_norm",
-    "cosine_similarity",
-    "SimpleVectorDB",
-    "load_ev_facts",
-    "build_rag_prompt",
-    "LlamaMacOSClient",
-    "LocalEmbeddingEngine",
-    "get_default_client",
-    "get_default_embedder",
-    "Chunk",
-    "chunk_document",
-    "chunk_fixed_character",
-    "chunk_markdown_sections",
-    "load_sample_markdown_corpus",
+    "AgenticRAGPipeline",
+    "CrossEncoderReranker",
     "DuckDBVectorStore",
     "HybridSearchEngine",
-    "HybridSearchResult",
-    "CrossEncoderReranker",
-    "RerankedCandidate",
-    "AgenticRAGPipeline",
-    "AgenticTrace",
-    "KnowledgeTriple",
-    "GraphSearchResult",
     "KnowledgeGraphStore",
-    "QueryExpansionResult",
-    "QueryExpander",
+    "LlamaMacOSClient",
+    "LocalEmbeddingEngine",
     "ModularRAGConfig",
-    "ModularCandidate",
-    "ModularRAGTrace",
     "ModularRAGPipeline",
+    "QueryExpander",
+    "SimpleVectorDB",
     "build_agentic_mermaid_diagram",
     "build_modular_rag_mermaid",
+    "build_rag_prompt",
     "build_studio_pipeline_mermaid",
+    "chunk_document",
+    "cosine_similarity",
+    "dot_product",
+    "get_default_client",
+    "get_default_embedder",
+    "load_ev_facts",
+    "load_sample_markdown_corpus",
     "render_2d_compass_svg",
     "render_ab_arena_comparison_svg",
     "render_chunk_timeline_svg",
@@ -99,4 +76,5 @@ __all__ = [
     "render_hybrid_rrf_svg",
     "render_rerank_slopegraph_svg",
     "render_subgraph_traversal_svg",
+    "vector_norm",
 ]

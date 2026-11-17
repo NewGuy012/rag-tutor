@@ -15,18 +15,18 @@ def _():
     if str(_src_dir) not in sys.path:
         sys.path.insert(0, str(_src_dir))
 
-    from rag_tutor.agentic_rag import AgenticRAGPipeline
-    from rag_tutor.chunker import (
-        chunk_document,
-        load_sample_markdown_corpus,
-    )
-    from rag_tutor.duckdb_store import DuckDBVectorStore
-    from rag_tutor.hybrid_search import HybridSearchEngine
-    from rag_tutor.llm_backend import get_default_client, get_default_embedder
-    from rag_tutor.reranker import CrossEncoderReranker
-    from rag_tutor.scratch_rag import SimpleVectorDB, build_rag_prompt
-    from rag_tutor.visualizations import (
+    from rag_tutor import (
+        AgenticRAGPipeline,
+        CrossEncoderReranker,
+        DuckDBVectorStore,
+        HybridSearchEngine,
+        SimpleVectorDB,
+        build_rag_prompt,
         build_studio_pipeline_mermaid,
+        chunk_document,
+        get_default_client,
+        get_default_embedder,
+        load_sample_markdown_corpus,
         render_ab_arena_comparison_svg,
         render_chunk_timeline_svg,
     )
@@ -41,7 +41,6 @@ def _():
         CrossEncoderReranker,
         DuckDBVectorStore,
         HybridSearchEngine,
-        Path,
         SimpleVectorDB,
         base_corpus,
         build_rag_prompt,
@@ -185,62 +184,58 @@ def _(
     )
 
     # 3. Production Pipeline B: DuckDB + Hybrid RRF + Reranker + Agentic Workflow
-    _store = DuckDBVectorStore(
-        db_path=":memory:",
-        embedding_dim=embedder.dim,
-        embed_fn=embedder.embed,
-    )
-    _store.index_chunks(_combined)
-    _hybrid = HybridSearchEngine(_store)
-    _reranker = CrossEncoderReranker()
+    with DuckDBVectorStore() as _store:
+        _store.index_chunks(_combined)
+        _hybrid = HybridSearchEngine(_store)
+        _reranker = CrossEncoderReranker()
 
-    if use_agentic_ctl.value:
-        _agent = AgenticRAGPipeline(_hybrid, _reranker, llm_client)
-        _trace = _agent.run(
-            query=studio_query_input.value,
-            model=model_dropdown.value,
-            enable_thinking=thinking_toggle.value,
-            final_top_k=top_k_ctl.value,
-        )
-        _prod_answer = _trace.final_answer
-        _prod_chunks = [
-            (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rerank_score, c.text)
-            for c in _trace.final_context_chunks
-        ]
-        _prod_meta = (
-            f"Sub-queries: {len(_trace.planned_sub_queries)} · "
-            f"Faithfulness: {_trace.faithfulness_score:.0%}"
-        )
-    else:
-        _s1 = _hybrid.search(
-            studio_query_input.value,
-            top_k=max(10, top_k_ctl.value * 3),
-            alpha=hybrid_alpha_ctl.value,
-        )
-        if use_reranker_ctl.value:
-            _s2 = _reranker.rerank(studio_query_input.value, _s1, top_k=top_k_ctl.value)
+        if use_agentic_ctl.value:
+            _agent = AgenticRAGPipeline(_hybrid, _reranker, llm_client)
+            _trace = _agent.run(
+                query=studio_query_input.value,
+                model=model_dropdown.value,
+                enable_thinking=thinking_toggle.value,
+                final_top_k=top_k_ctl.value,
+            )
+            _prod_answer = _trace.final_answer
             _prod_chunks = [
                 (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rerank_score, c.text)
-                for c in _s2
+                for c in _trace.final_context_chunks
             ]
+            _prod_meta = (
+                f"Sub-queries: {len(_trace.planned_sub_queries)} · "
+                f"Faithfulness: {_trace.faithfulness_score:.0%}"
+            )
         else:
-            _prod_chunks = [
-                (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rrf_score, c.text)
-                for c in _s1[: top_k_ctl.value]
-            ]
-        _prod_sys, _prod_usr = build_rag_prompt(
-            studio_query_input.value,
-            [(txt, sc) for _, sc, txt in _prod_chunks],
-        )
-        _prod_gen = llm_client.generate(
-            system_prompt=_prod_sys,
-            user_prompt=_prod_usr,
-            model=model_dropdown.value,
-            enable_thinking=thinking_toggle.value,
-            retrieved_context=[txt for _, _, txt in _prod_chunks],
-        )
-        _prod_answer = _prod_gen.content
-        _prod_meta = f"Hybrid α={hybrid_alpha_ctl.value:.1f} · Reranker={'ON' if use_reranker_ctl.value else 'OFF'}"
+            _s1 = _hybrid.search(
+                studio_query_input.value,
+                top_k=max(10, top_k_ctl.value * 3),
+                alpha=hybrid_alpha_ctl.value,
+            )
+            if use_reranker_ctl.value:
+                _s2 = _reranker.rerank(studio_query_input.value, _s1, top_k=top_k_ctl.value)
+                _prod_chunks = [
+                    (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rerank_score, c.text)
+                    for c in _s2
+                ]
+            else:
+                _prod_chunks = [
+                    (f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})", c.rrf_score, c.text)
+                    for c in _s1[: top_k_ctl.value]
+                ]
+            _prod_sys, _prod_usr = build_rag_prompt(
+                studio_query_input.value,
+                [(txt, sc) for _, sc, txt in _prod_chunks],
+            )
+            _prod_gen = llm_client.generate(
+                system_prompt=_prod_sys,
+                user_prompt=_prod_usr,
+                model=model_dropdown.value,
+                enable_thinking=thinking_toggle.value,
+                retrieved_context=[txt for _, _, txt in _prod_chunks],
+            )
+            _prod_answer = _prod_gen.content
+            _prod_meta = f"Hybrid α={hybrid_alpha_ctl.value:.1f} · Reranker={'ON' if use_reranker_ctl.value else 'OFF'}"
 
     _pipeline_mermaid = mo.mermaid(
         build_studio_pipeline_mermaid(

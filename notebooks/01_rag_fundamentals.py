@@ -16,26 +16,24 @@ def _():
     if str(_src_dir) not in sys.path:
         sys.path.insert(0, str(_src_dir))
 
-    from rag_tutor.llm_backend import get_default_client, get_default_embedder
-    from rag_tutor.scratch_rag import (
+    from rag_tutor import (
         SimpleVectorDB,
         build_rag_prompt,
         cosine_similarity,
         dot_product,
+        get_default_client,
+        get_default_embedder,
         load_ev_facts,
-        vector_norm,
-    )
-    from rag_tutor.visualizations import (
         render_2d_compass_svg,
         render_embedding_barcode_svg,
         render_embedding_space_2d_svg,
+        vector_norm,
     )
 
     llm_client = get_default_client()
     embedder = get_default_embedder()
     ev_facts = load_ev_facts()
     return (
-        Path,
         SimpleVectorDB,
         build_rag_prompt,
         cosine_similarity,

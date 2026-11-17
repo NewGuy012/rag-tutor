@@ -16,56 +16,39 @@ def _():
     if str(_src_dir) not in sys.path:
         sys.path.insert(0, str(_src_dir))
 
-    from rag_tutor.chunker import load_sample_markdown_corpus
-    from rag_tutor.duckdb_store import DuckDBVectorStore
-    from rag_tutor.hybrid_search import HybridSearchEngine
-    from rag_tutor.llm_backend import get_default_client, get_default_embedder
-    from rag_tutor.modular_graph_rag import (
+    from rag_tutor import (
+        DuckDBVectorStore,
+        HybridSearchEngine,
         KnowledgeGraphStore,
         ModularRAGConfig,
         ModularRAGPipeline,
-        QueryExpander,
-    )
-    from rag_tutor.reranker import CrossEncoderReranker
-    from rag_tutor.visualizations import (
         build_modular_rag_mermaid,
+        get_default_client,
+        load_sample_markdown_corpus,
         render_fusion_comparison_svg,
         render_subgraph_traversal_svg,
     )
 
-    embedder = get_default_embedder()
     llm_client = get_default_client()
     corpus_chunks = load_sample_markdown_corpus(
         strategy="markdown", chunk_size=480, chunk_overlap=70
     )
-    store = DuckDBVectorStore(
-        db_path=":memory:",
-        embedding_dim=embedder.dim,
-        embed_fn=embedder.embed,
-    )
+    store = DuckDBVectorStore()
     store.index_chunks(corpus_chunks)
     hybrid_engine = HybridSearchEngine(store)
     graph_store = KnowledgeGraphStore(corpus_chunks)
-    reranker = CrossEncoderReranker()
-    expander = QueryExpander(llm_client)
     modular_pipeline = ModularRAGPipeline(
         store=store,
         chunks=corpus_chunks,
         hybrid_engine=hybrid_engine,
         graph_store=graph_store,
-        reranker=reranker,
-        expander=expander,
         llm_client=llm_client,
-        embed_fn=embedder.embed,
     )
     metadata_vals = store.list_metadata_values()
     return (
-        KnowledgeGraphStore,
         ModularRAGConfig,
         build_modular_rag_mermaid,
         corpus_chunks,
-        embedder,
-        expander,
         graph_store,
         html,
         hybrid_engine,
@@ -75,7 +58,6 @@ def _():
         modular_pipeline,
         render_fusion_comparison_svg,
         render_subgraph_traversal_svg,
-        reranker,
         store,
     )
 
