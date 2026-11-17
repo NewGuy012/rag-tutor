@@ -203,7 +203,7 @@ ORDER BY vector_score DESC
 LIMIT 5;
 ```
 
-*(Explore this interactively in [`notebooks/02_chunking_and_duckdb.py`](../notebooks/02_chunking_and_duckdb.py).)*
+*(Explore this interactively in [`notebooks/02_chunking_and_duckdb.py`](../notebooks/02_chunking_and_duckdb.py). The SQL playground in [`DuckDBVectorStore`](../src/rag_tutor/duckdb_store.py) also locks `enable_external_access = false` and uses DuckDB's `extract_statements` parser to enforce single read-only `SELECT` queries.)*
 
 ---
 
@@ -289,6 +289,8 @@ sequenceDiagram
   ```
 - **Fast Non-Thinking RAG Mode vs. Thinking Mode**:
   `src/rag_tutor/llm_backend.py` supports toggling `reasoning_effort="none"` and `chat_template_kwargs={"enable_thinking": False}` so standard RAG queries answer rapidly, while allowing full reasoning when desired.
+- **Loopback-Only & Prompt Isolation**:
+  `LlamaMacOSClient` restricts URLs to loopback hosts without redirects or proxy env overrides, and `build_rag_prompt` isolates retrieved chunks inside `<context>` tags to mitigate indirect prompt injection.
 - **Zero-Friction Offline Fallback**:
   If `Llama.app` is closed or loading weights, `RAG Tutor` automatically falls back to a built-in deterministic context synthesizer so every slider, SQL query, hybrid fusion, and reranking step in the Marimo notebooks continues working without interruption.
 

@@ -77,8 +77,9 @@ flowchart LR
 ## ⚡ Quickstart
 
 ### 1. Prerequisites
+- **Python `>=3.12`**
 - **[Astral `uv`](https://docs.astral.sh/uv/)** (installed at `/opt/homebrew/bin/uv`)
-- **[DuckDB](https://duckdb.org/)** (installed at `/opt/homebrew/bin/duckdb` and included in Python dependencies)
+- **[DuckDB](https://duckdb.org/)** (only core runtime dependency; `marimo` is installed via the `dev` dependency group)
 - **[`Llama.app` (`ggml-org/Llama-macOS`)](https://github.com/ggml-org/Llama-macOS)** installed in `/Applications/Llama.app` (runs local OpenAI-compatible server at `http://localhost:9931/v1`).
   - *Note: Even if `Llama.app` is not currently running, all five notebooks include a built-in deterministic fallback synthesizer and local embedding engine so you can run and explore every widget immediately!*
 
@@ -86,6 +87,7 @@ flowchart LR
 ```bash
 uv sync
 ```
+*(Use `uv sync --no-dev` if you only need the `rag_tutor` library + DuckDB without Marimo.)*
 
 ### 3. Launch the Interactive Marimo Notebooks
 
@@ -111,6 +113,11 @@ uv run marimo edit notebooks/05_advanced_modular_graph_rag.py
 Or launch the Capstone Studio as a clean **web app**:
 ```bash
 uv run marimo run notebooks/04_final_project_studio.py
+```
+
+### 4. Run Unit Tests
+```bash
+uv run python -m unittest discover -s tests -v
 ```
 
 ---
@@ -139,12 +146,14 @@ rag-tutor/
 │       ├── agentic_rag.py         # Query planner, iterative retriever & verifier
 │       ├── modular_graph_rag.py   # KnowledgeGraphStore, HyDE/Multi-Query & Modular RAG
 │       └── visualizations.py      # Interactive SVG, PCA map, heatmap & Mermaid builders
-└── notebooks/
-    ├── 01_rag_fundamentals.py
-    ├── 02_chunking_and_duckdb.py
-    ├── 03_advanced_rag.py
-    ├── 04_final_project_studio.py
-    └── 05_advanced_modular_graph_rag.py
+├── notebooks/
+│   ├── 01_rag_fundamentals.py
+│   ├── 02_chunking_and_duckdb.py
+│   ├── 03_advanced_rag.py
+│   ├── 04_final_project_studio.py
+│   └── 05_advanced_modular_graph_rag.py
+└── tests/
+    └── test_rag_tutor.py
 ```
 
 ---
