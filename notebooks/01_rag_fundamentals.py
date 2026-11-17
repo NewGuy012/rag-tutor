@@ -6,6 +6,7 @@ app = marimo.App(width="medium", app_title="RAG Tutor 01: Fundamentals & Scratch
 
 @app.cell
 def _():
+    import html
     import math
     import sys
     from pathlib import Path
@@ -40,6 +41,7 @@ def _():
         dot_product,
         embedder,
         ev_facts,
+        html,
         llm_client,
         math,
         mo,
@@ -128,6 +130,7 @@ def _(mo):
 @app.cell
 def _(
     hallucination_query_picker,
+    html,
     llm_client,
     mo,
     model_dropdown,
@@ -158,15 +161,15 @@ def _(
         mo.md(
             f"**❌ Without RAG (Parametric Memory Only)**\n\n"
             f"*Context Injected:* `None`\n\n"
-            f"> {_no_rag_res.content}"
+            f"> {html.escape(_no_rag_res.content)}"
         ),
         kind="warn",
     )
     _with_rag_card = mo.callout(
         mo.md(
             f"**✅ With RAG (Grounded Context Injected)**\n\n"
-            f"*Verified Fact:* `{_fact_context}`\n\n"
-            f"> {_with_rag_res.content}"
+            f"*Verified Fact:* `{html.escape(_fact_context)}`\n\n"
+            f"> {html.escape(_with_rag_res.content)}"
         ),
         kind="success",
     )
@@ -274,11 +277,11 @@ def _(
 
 @app.cell
 def _(SimpleVectorDB, embedder, ev_facts):
-    # Build the 50-line Scratch RAG Vector DB in pure Python!
     scratch_db = SimpleVectorDB()
     scratch_db.index_chunks(ev_facts, embedder.embed)
     ev_embeddings = [vec for _, vec in scratch_db.entries]
-    return ev_embeddings, scratch_db
+    ev_embedding_map = dict(scratch_db.entries)
+    return ev_embedding_map, ev_embeddings, scratch_db
 
 
 @app.cell
@@ -307,8 +310,10 @@ def _(mo):
 def _(
     build_rag_prompt,
     embedder,
+    ev_embedding_map,
     ev_embeddings,
     ev_facts,
+    html,
     inspect_rank_dropdown,
     llm_client,
     mo,
@@ -332,7 +337,6 @@ def _(
         retrieved_context=[chunk for chunk, _ in _retrieved],
     )
 
-    # 1. Render 2D Embedding Space Map (PCA projection of all 16 EV facts + live Query Star)
     _space_map_html = render_embedding_space_2d_svg(
         chunks=ev_facts,
         embeddings=ev_embeddings,
@@ -341,29 +345,25 @@ def _(
         top_n=top_n_slider.value,
     )
 
-    # 2. Render 128-D Embedding Barcode for the chosen rank
-    _sel_idx = min(inspect_rank_dropdown.value, len(_retrieved) - 1)
-    _sel_chunk, _sel_score = _retrieved[_sel_idx]
-    _sel_vec = embedder.embed(_sel_chunk)
-    _barcode_html = render_embedding_barcode_svg(
-        query_vec=_q_vec,
-        doc_vec=_sel_vec,
-        cosine_score=_sel_score,
-    )
+    _barcode_html = ""
+    if _retrieved:
+        _sel_chunk, _sel_score = _retrieved[min(inspect_rank_dropdown.value, len(_retrieved) - 1)]
+        _sel_vec = ev_embedding_map.get(_sel_chunk) or embedder.embed(_sel_chunk)
+        _barcode_html = render_embedding_barcode_svg(
+            query_vec=_q_vec,
+            doc_vec=_sel_vec,
+            cosine_score=_sel_score,
+        )
 
     _rows_md = "\n".join(
-        f"| **#{idx + 1}** | `{score:.4f}` | {chunk} |"
+        f"| **#{idx + 1}** | `{score:.4f}` | {html.escape(chunk).replace('|', '\\|')} |"
         for idx, (chunk, score) in enumerate(_retrieved)
     )
 
     _tabs = mo.ui.tabs(
         {
             "🌌 2D Embedding Space & 128-D Barcode": mo.vstack(
-                [
-                    mo.Html(_space_map_html),
-                    mo.hstack([inspect_rank_dropdown], justify="start"),
-                    mo.Html(_barcode_html),
-                ]
+                [mo.Html(_space_map_html), mo.Html(_barcode_html)]
             ),
             "📋 Top-N Retrieved Chunks Table": mo.md(
                 f"""
@@ -405,7 +405,7 @@ def _(
         {_tabs}
 
         ### Grounded LLM Response (`{_gen.model}` · `{_gen.latency_ms:.0f} ms`)
-        > {_gen.content}
+        > {html.escape(_gen.content)}
 
         ---
         **Next Up**: In `notebooks/02_chunking_and_duckdb.py`, we'll visually explore document chunking & sliding overlap on a **Document Timeline Minimap** and index our vectors into **DuckDB**!

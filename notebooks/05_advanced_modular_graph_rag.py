@@ -158,27 +158,23 @@ def _(
     )
 
     _dense_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.4f}` | `{r.doc_source}` > **{r.section_title}** |"
+        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
         for i, r in enumerate(_dense_hits)
-    )
+    ) or "| — | — | — | _Enter a query to search_ |"
     _sparse_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.3f}` | `{r.doc_source}` > **{r.section_title}** |"
+        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.3f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
         for i, r in enumerate(_sparse_hits)
-    )
+    ) or "| — | — | — | _Enter a query to search_ |"
     _graph_svg = render_subgraph_traversal_svg(_graph_res)
     _triple_rows = "\n".join(
-        f"| **{hop}-hop** | `{t.subject}` | `--[{t.predicate}]-->` | `{t.obj}` | Chunk #{t.source_chunk_id} (`{t.doc_source}`) |"
+        f"| **{hop}-hop** | `{html.escape(t.subject).replace('|', '\\|')}` | `--[{html.escape(t.predicate).replace('|', '\\|')}]-->` | `{html.escape(t.obj).replace('|', '\\|')}` | Chunk #{t.source_chunk_id} (`{html.escape(t.doc_source)}`) |"
         for t, hop in _graph_res.matched_triples
-    )
-    if not _triple_rows:
-        _triple_rows = "| — | _No triples matched_ | — | — | — |"
+    ) or "| — | _No triples matched_ | — | — | — |"
 
     _sql_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.department}` | `{r.updated_year}` | `{r.score:.4f}` | `{r.doc_source}` > {r.section_title} |"
+        f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{html.escape(r.department)}` | `{r.updated_year}` | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > {html.escape(r.section_title).replace('|', '\\|')} |"
         for i, r in enumerate(_filtered_hits)
-    )
-    if not _sql_rows:
-        _sql_rows = "| — | — | _No rows matched SQL filter_ | — | — | — |"
+    ) or "| — | — | _No rows matched SQL filter_ | — | — | — |"
 
     _tabs = mo.ui.tabs(
         {
@@ -284,6 +280,7 @@ def _(
     fusion_alpha_slider,
     fusion_query_preset,
     fusion_rrf_k_slider,
+    html,
     hybrid_engine,
     mo,
     render_fusion_comparison_svg,
@@ -297,7 +294,7 @@ def _(
     _fusion_svg = render_fusion_comparison_svg(_rrf_res, _conv_res, alpha=_alpha, rrf_k=_k)
 
     _conv_rows = "\n".join(
-        f"| **#{r.final_rank}** | Chunk #{r.chunk_id} | `{r.vector_score:.3f}` → **`{r.norm_vector_score:.3f}`** | `{r.bm25_score:.2f}` → **`{r.norm_bm25_score:.3f}`** | **`{r.convex_score:.4f}`** | `{r.rrf_score:.5f}` | `{r.doc_source}` > {r.section_title} |"
+        f"| **#{r.final_rank}** | Chunk #{r.chunk_id} | `{r.vector_score:.3f}` → **`{r.norm_vector_score:.3f}`** | `{r.bm25_score:.2f}` → **`{r.norm_bm25_score:.3f}`** | **`{r.convex_score:.4f}`** | `{r.rrf_score:.5f}` | `{html.escape(r.doc_source)}` > {html.escape(r.section_title).replace('|', '\\|')} |"
         for r in _conv_res
     )
 
@@ -413,7 +410,7 @@ def _(
         _exp_block = mo.callout(
             mo.md(
                 "**Multi-Query Variations Executed**:\n"
-                + "\n".join(f"{i + 1}. `{q}`" for i, q in enumerate(_trace.expansion.expanded_queries))
+                + "\n".join(f"{i + 1}. `{html.escape(q)}`" for i, q in enumerate(_trace.expansion.expanded_queries))
             ),
             kind="info",
         )
@@ -429,11 +426,9 @@ def _(
         _exp_block = mo.md("_Direct query mode active (no query expansion applied)._")
 
     _cand_rows = "\n".join(
-        f"| **#{i + 1}** | Chunk #{c.chunk_id} | {', '.join(f'`{s}`' for s in c.sources)} | `{c.combined_score:.4f}` | `{c.rerank_score:.4f}` | `{c.doc_source}` > **{c.section_title}** |"
-        if c.rerank_score is not None
-        else f"| **#{i + 1}** | Chunk #{c.chunk_id} | {', '.join(f'`{s}`' for s in c.sources)} | `{c.combined_score:.4f}` | _Bypassed_ | `{c.doc_source}` > **{c.section_title}** |"
+        f"| **#{i + 1}** | Chunk #{c.chunk_id} | {', '.join(f'`{html.escape(s)}`' for s in c.sources)} | `{c.combined_score:.4f}` | {f'`{c.rerank_score:.4f}`' if c.rerank_score is not None else '_Bypassed_'} | `{html.escape(c.doc_source)}` > **{html.escape(c.section_title).replace('|', '\\|')}** |"
         for i, c in enumerate(_trace.final_candidates)
-    )
+    ) or "| — | — | — | — | — | _No candidates retrieved_ |"
 
     mo.md(
         f"""
@@ -458,7 +453,7 @@ def _(
         {_cand_rows}
 
         ### Grounded Answer (`{_trace.llm_model_used}` · `{_trace.latency_ms:.0f} ms`)
-        {mo.callout(mo.md(_trace.final_answer), kind="success")}
+        {mo.callout(mo.md(html.escape(_trace.final_answer)), kind="success")}
         """
     )
     return

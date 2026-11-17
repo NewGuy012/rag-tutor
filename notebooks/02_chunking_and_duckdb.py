@@ -22,20 +22,23 @@ def _():
         get_default_embedder,
         load_sample_markdown_corpus,
         render_chunk_timeline_svg,
+        render_vector_hits_card,
     )
 
     sample_docs_dir = _repo_root / "data" / "sample_docs"
     doc_files = {p.name: p.read_text(encoding="utf-8") for p in sorted(sample_docs_dir.glob("*.md"))}
     embedder = get_default_embedder()
+    duck_store = DuckDBVectorStore()
     return (
-        DuckDBVectorStore,
         chunk_document,
         doc_files,
+        duck_store,
         embedder,
         html,
         load_sample_markdown_corpus,
         mo,
         render_chunk_timeline_svg,
+        render_vector_hits_card,
         sample_docs_dir,
     )
 
@@ -189,27 +192,26 @@ def _(
         {mo.accordion({"📄 Expand to Inspect Individual Chunk Cards (" + str(len(preview_chunks)) + " chunks)": mo.Html("".join(_cards))}, expanded=True)}
         """
     )
-    return (preview_chunks,)
+    return
 
 
 @app.cell
 def _(
-    DuckDBVectorStore,
     chunk_overlap_slider,
     chunk_size_slider,
+    duck_store,
     load_sample_markdown_corpus,
     sample_docs_dir,
     strategy_selector,
 ):
-    corpus_chunks = load_sample_markdown_corpus(
+    _corpus_chunks = load_sample_markdown_corpus(
         corpus_dir=sample_docs_dir,
         strategy=strategy_selector.value,
         chunk_size=chunk_size_slider.value,
         chunk_overlap=chunk_overlap_slider.value,
     )
-    duck_store = DuckDBVectorStore()
-    indexed_count = duck_store.index_chunks(corpus_chunks)
-    return corpus_chunks, duck_store, indexed_count
+    indexed_count = duck_store.index_chunks(_corpus_chunks, replace=True)
+    return (indexed_count,)
 
 
 @app.cell
@@ -277,34 +279,14 @@ def _(
     duck_store,
     duck_top_k,
     embedder,
-    html,
     indexed_count,
     mo,
+    render_vector_hits_card,
     sql_playground_input,
     sql_recipe_picker,
 ):
     _vec_hits = duck_store.search_vector(duck_query_input.value, top_k=duck_top_k.value)
-
-    _bars_html = []
-    for _idx, _r in enumerate(_vec_hits):
-        _pct = max(5.0, min(100.0, _r.score * 100.0))
-        _excerpt = html.escape(_r.text[:145].replace("\n", " "))
-        _bars_html.append(
-            f"""
-            <div style="background:#020617;padding:9px 12px;border-radius:8px;border:1px solid #1e293b;margin-bottom:7px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:4px;">
-                <span style="color:#f8fafc;font-family:monospace;">
-                  <strong>#{_idx + 1}</strong> · <code>{html.escape(_r.doc_source)}</code> &gt; <strong>{html.escape(_r.section_title)}</strong> (Chunk #{_r.chunk_id})
-                </span>
-                <span style="color:#2dd4bf;font-family:monospace;font-weight:700;">vector_score = {_r.score:.4f}</span>
-              </div>
-              <div style="background:#1e293b;height:8px;border-radius:4px;overflow:hidden;margin-bottom:5px;">
-                <div style="width:{_pct:.1f}%;background:linear-gradient(90deg,#0284c7,#2dd4bf);height:100%;border-radius:4px;"></div>
-              </div>
-              <div style="font-size:12px;color:#94a3b8;font-family:ui-monospace,monospace;">{_excerpt}...</div>
-            </div>
-            """
-        )
+    _hits_card = render_vector_hits_card(_vec_hits, duck_top_k.value)
 
     try:
         _sql_rows = duck_store.run_custom_sql(sql_playground_input.value)
@@ -337,12 +319,7 @@ def _(
         {duck_query_input}
         {duck_top_k}
 
-        <div style="background:#0f172a;padding:12px 14px;border-radius:12px;border:1px solid #334155;margin:8px 0;">
-          <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:8px;">
-            📊 DuckDB Cosine Similarity Ranking (Top-{duck_top_k.value} Results)
-          </div>
-          {"".join(_bars_html)}
-        </div>
+        {mo.Html(_hits_card)}
 
         ---
         ### Interactive DuckDB SQL Playground

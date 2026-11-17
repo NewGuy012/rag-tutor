@@ -6,6 +6,7 @@ app = marimo.App(width="medium", app_title="RAG Tutor 03: Production Improvement
 
 @app.cell
 def _():
+    import html
     import sys
     from pathlib import Path
     import marimo as mo
@@ -45,6 +46,7 @@ def _():
     return (
         agentic_pipeline,
         build_agentic_mermaid_diagram,
+        html,
         hybrid_engine,
         llm_client,
         mo,
@@ -120,6 +122,7 @@ def _(mo):
 
 @app.cell
 def _(
+    html,
     hybrid_alpha_slider,
     hybrid_engine,
     hybrid_preset,
@@ -127,53 +130,56 @@ def _(
     mo,
     render_hybrid_rrf_svg,
 ):
-    hybrid_results = hybrid_engine.search(
+    _hybrid_results = hybrid_engine.search(
         query=hybrid_preset.value,
         top_k=6,
         alpha=hybrid_alpha_slider.value,
         rrf_k=hybrid_rrf_k.value,
     )
     _rrf_svg = render_hybrid_rrf_svg(
-        hybrid_results=hybrid_results,
+        hybrid_results=_hybrid_results,
         alpha=hybrid_alpha_slider.value,
         rrf_k=hybrid_rrf_k.value,
     )
 
     _rows = "\n".join(
-        f"| **#{r.final_rank}** | `{r.rrf_score:.5f}` | #{r.vector_rank} (`{r.vector_score:.3f}`) | #{r.bm25_rank} (`{r.bm25_score:.2f}`) | `{r.doc_source}` > **{r.section_title}** | {r.text[:110].replace(chr(10), ' ')}... |"
-        for r in hybrid_results
+        f"| **#{r.final_rank}** | `{r.rrf_score:.5f}` | #{r.vector_rank} (`{r.vector_score:.3f}`) | #{r.bm25_rank} (`{r.bm25_score:.2f}`) | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** | {html.escape(r.text[:110].replace(chr(10), ' ')).replace('|', '\\|')}... |"
+        for r in _hybrid_results
     )
 
-    _top = hybrid_results[0]
     _mode_lbl = (
         "Pure BM25 Lexical"
         if hybrid_alpha_slider.value == 0.0
         else ("Pure Vector Semantic" if hybrid_alpha_slider.value == 1.0 else f"Balanced Hybrid (α={hybrid_alpha_slider.value:.1f})")
     )
-    _stats = mo.hstack(
-        [
-            mo.stat(
-                value=f"Chunk #{_top.chunk_id}",
-                label="Hybrid Rank #1 Winner",
-                caption=f"{_top.doc_source} > {_top.section_title}",
-                bordered=True,
-            ),
-            mo.stat(
-                value=f"Vec #{_top.vector_rank} / BM25 #{_top.bm25_rank}",
-                label="Winner's Retriever Ranks",
-                caption=f"Fused RRF = {_top.rrf_score:.5f}",
-                bordered=True,
-            ),
-            mo.stat(
-                value=_mode_lbl,
-                label="Active Fusion Mode",
-                caption=f"Smoothing constant k = {hybrid_rrf_k.value}",
-                bordered=True,
-            ),
-        ],
-        widths="equal",
-        gap=2,
-    )
+    if _hybrid_results:
+        _top = _hybrid_results[0]
+        _stats = mo.hstack(
+            [
+                mo.stat(
+                    value=f"Chunk #{_top.chunk_id}",
+                    label="Hybrid Rank #1 Winner",
+                    caption=f"{_top.doc_source} > {_top.section_title}",
+                    bordered=True,
+                ),
+                mo.stat(
+                    value=f"Vec #{_top.vector_rank} / BM25 #{_top.bm25_rank}",
+                    label="Winner's Retriever Ranks",
+                    caption=f"Fused RRF = {_top.rrf_score:.5f}",
+                    bordered=True,
+                ),
+                mo.stat(
+                    value=_mode_lbl,
+                    label="Active Fusion Mode",
+                    caption=f"Smoothing constant k = {hybrid_rrf_k.value}",
+                    bordered=True,
+                ),
+            ],
+            widths="equal",
+            gap=2,
+        )
+    else:
+        _stats = mo.md("_No matching chunks._")
 
     mo.md(
         f"""
@@ -199,7 +205,7 @@ def _(
         {_rows}
         """
     )
-    return (hybrid_results,)
+    return
 
 
 @app.cell
@@ -224,6 +230,7 @@ def _(mo):
 
 @app.cell
 def _(
+    html,
     hybrid_engine,
     mo,
     render_cross_attention_heatmap_svg,
@@ -269,7 +276,7 @@ def _(
         else:
             _shift_badge = f"⚪ **Unchanged** (#{_item.stage1_rank})"
         _rerank_rows.append(
-            f"| **#{_item.stage2_rank}** | {_shift_badge} | `{_item.rerank_score:.4f}` | `{_item.doc_source}` > **{_item.section_title}** | _{_item.explanation}_ |"
+            f"| **#{_item.stage2_rank}** | {_shift_badge} | `{_item.rerank_score:.4f}` | `{html.escape(_item.doc_source)}` > **{html.escape(_item.section_title).replace('|', '\\|')}** | _{html.escape(_item.explanation).replace('|', '\\|')}_ |"
         )
 
     mo.md(
@@ -311,35 +318,36 @@ def _(
     agentic_pipeline,
     agentic_query_input,
     build_agentic_mermaid_diagram,
+    html,
     mo,
     model_dropdown,
     render_faithfulness_audit_svg,
     thinking_toggle,
 ):
-    trace = agentic_pipeline.run(
+    _trace = agentic_pipeline.run(
         query=agentic_query_input.value,
         model=model_dropdown.value,
         enable_thinking=thinking_toggle.value,
     )
 
-    _mermaid_diagram = mo.mermaid(build_agentic_mermaid_diagram(trace))
-    _audit_html = render_faithfulness_audit_svg(trace)
+    _mermaid_diagram = mo.mermaid(build_agentic_mermaid_diagram(_trace))
+    _audit_html = render_faithfulness_audit_svg(_trace)
 
     _step_rows = "\n".join(
-        f"| **Step {s.step_number}** | `{s.sub_query}` | {s.reason} | **Chunk #{s.top_chunk_id}** (`{s.top_doc_source}` > {s.top_section}) | `{s.rerank_score:.3f}` |"
-        for s in trace.retrieval_steps
+        f"| **Step {s.step_number}** | `{html.escape(s.sub_query).replace('|', '\\|')}` | {html.escape(s.reason)} | **Chunk #{s.top_chunk_id}** (`{html.escape(s.top_doc_source)}` > {html.escape(s.top_section).replace('|', '\\|')}) | `{s.rerank_score:.3f}` |"
+        for s in _trace.retrieval_steps
     )
 
     _trace_tree = mo.tree(
         {
-            "original_query": trace.original_query,
-            "is_multi_hop": trace.is_multi_hop,
-            "planned_sub_queries": trace.planned_sub_queries,
-            "sufficiency_passed": trace.sufficiency_passed,
-            "faithfulness_score": trace.faithfulness_score,
+            "original_query": _trace.original_query,
+            "is_multi_hop": _trace.is_multi_hop,
+            "planned_sub_queries": _trace.planned_sub_queries,
+            "sufficiency_passed": _trace.sufficiency_passed,
+            "faithfulness_score": _trace.faithfulness_score,
             "retrieved_chunks": [
                 f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title}) [score={c.rerank_score:.3f}]"
-                for c in trace.final_context_chunks
+                for c in _trace.final_context_chunks
             ],
         },
         label="AgenticTrace",
@@ -359,15 +367,15 @@ def _(
         {_mermaid_diagram}
 
         ### Step 1 & 2: Sub-Query Planner & Iterative Retrieval
-        - **Multi-Hop Detected**: `{trace.is_multi_hop}` · **Planned Sub-Queries ({len(trace.planned_sub_queries)})**: {", ".join(f"`{sq}`" for sq in trace.planned_sub_queries)}
-        - **Sufficiency Audit**: {'✅ Passed' if trace.sufficiency_passed else '⚠️ Low Confidence'} — _{trace.sufficiency_note}_
+        - **Multi-Hop Detected**: `{_trace.is_multi_hop}` · **Planned Sub-Queries ({len(_trace.planned_sub_queries)})**: {", ".join(f"`{html.escape(sq)}`" for sq in _trace.planned_sub_queries)}
+        - **Sufficiency Audit**: {'✅ Passed' if _trace.sufficiency_passed else '⚠️ Low Confidence'} — _{html.escape(_trace.sufficiency_note)}_
 
         | Step | Sub-Query Executed | Planner Reason | Top Reranked Evidence | Cross-Encoder Score |
         | :--- | :--- | :--- | :--- | :--- |
         {_step_rows}
 
-        ### Step 3: Grounded Answer (`{trace.llm_model_used}` · `{trace.latency_ms:.0f} ms`)
-        > {trace.final_answer}
+        ### Step 3: Grounded Answer (`{_trace.llm_model_used}` · `{_trace.latency_ms:.0f} ms`)
+        > {html.escape(_trace.final_answer)}
 
         ### Step 4: Self-Reflection & Faithfulness Verification
         {mo.Html(_audit_html)}
@@ -375,7 +383,7 @@ def _(
         {mo.accordion({"🌳 Inspect Raw AgenticTrace Object (`mo.tree`)": _trace_tree})}
         """
     )
-    return (trace,)
+    return
 
 
 if __name__ == "__main__":

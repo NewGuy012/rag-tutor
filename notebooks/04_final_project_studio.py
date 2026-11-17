@@ -6,6 +6,8 @@ app = marimo.App(width="medium", app_title="RAG Tutor 04: Capstone Final Project
 
 @app.cell
 def _():
+    import dataclasses
+    import html
     import sys
     from pathlib import Path
     import marimo as mo
@@ -46,7 +48,9 @@ def _():
         build_rag_prompt,
         build_studio_pipeline_mermaid,
         chunk_document,
+        dataclasses,
         embedder,
+        html,
         llm_client,
         mo,
         render_ab_arena_comparison_svg,
@@ -127,7 +131,9 @@ def _(
     chunk_document,
     chunk_strategy_ctl,
     custom_doc_editor,
+    dataclasses,
     embedder,
+    html,
     hybrid_alpha_ctl,
     is_online,
     llm_client,
@@ -142,11 +148,11 @@ def _(
     use_agentic_ctl,
     use_reranker_ctl,
 ):
-    # 1. Chunk the user's custom document and combine with the core sample docs
+    _target_size = 450 if chunk_strategy_ctl.value == "fixed" else 480
     _custom_chunks = chunk_document(
         custom_doc_editor.value,
         strategy=chunk_strategy_ctl.value,
-        chunk_size=450 if chunk_strategy_ctl.value == "fixed" else 480,
+        chunk_size=_target_size,
         chunk_overlap=60,
         doc_source="custom_runbook.md",
     )
@@ -155,20 +161,20 @@ def _(
         raw_text=custom_doc_editor.value,
         chunks=_custom_chunks,
         strategy_name=chunk_strategy_ctl.value,
-        target_chunk_size=480,
+        target_chunk_size=_target_size,
     )
 
-    _combined = list(base_corpus)
-    for _c in _custom_chunks:
-        _c.chunk_id = len(_combined) + 1
-        _combined.append(_c)
+    _combined = [
+        *base_corpus,
+        *(dataclasses.replace(_c, chunk_id=len(base_corpus) + _i + 1) for _i, _c in enumerate(_custom_chunks)),
+    ]
 
-    # 2. Baseline Pipeline A: Scratch In-Memory Vector RAG (Notebook 1 style)
     _scratch_db = SimpleVectorDB()
     _scratch_db.index_chunks([_c.text for _c in _combined], embedder.embed)
-    _q_vec = embedder.embed(studio_query_input.value)
-    _baseline_hits = _scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value)
-    _base_sys, _base_usr = build_rag_prompt(studio_query_input.value, _baseline_hits)
+    _query_clean = studio_query_input.value.strip()
+    _q_vec = embedder.embed(_query_clean)
+    _baseline_hits = _scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value) if _query_clean else []
+    _base_sys, _base_usr = build_rag_prompt(_query_clean, _baseline_hits)
     _base_ans = llm_client.generate(
         system_prompt=_base_sys,
         user_prompt=_base_usr,
@@ -177,7 +183,6 @@ def _(
         retrieved_context=[t for t, _ in _baseline_hits],
     )
 
-    # 3. Production Pipeline B: DuckDB + Hybrid RRF + Reranker + Agentic Workflow
     with DuckDBVectorStore() as _store:
         _store.index_chunks(_combined)
         _hybrid = HybridSearchEngine(_store)
@@ -279,7 +284,7 @@ def _(
         mo.md(
             f"**📘 Pipeline A: Basic 50-Line Scratch RAG**\n\n"
             f"*Storage:* Python `list` · *Retrieval:* Pure Cosine Similarity\n\n"
-            f"{_base_ans.content}"
+            f"{html.escape(_base_ans.content)}"
         ),
         kind="info",
     )
@@ -287,7 +292,7 @@ def _(
         mo.md(
             f"**🚀 Pipeline B: Production RAG ({_prod_meta})**\n\n"
             f"*Storage:* Embedded DuckDB (`FLOAT[{embedder.dim}]` + BM25)\n\n"
-            f"{_prod_answer}"
+            f"{html.escape(_prod_answer)}"
         ),
         kind="success",
     )
