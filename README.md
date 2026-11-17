@@ -77,7 +77,7 @@ flowchart LR
 ## ⚡ Quickstart
 
 ### 1. Prerequisites
-- **Python `>=3.12`**
+- **Python `>=3.15`**
 - **[Astral `uv`](https://docs.astral.sh/uv/)** (installed at `/opt/homebrew/bin/uv`)
 - **[DuckDB](https://duckdb.org/)** (only core runtime dependency; `marimo` is installed via the `dev` dependency group)
 - **[`Llama.app` (`ggml-org/Llama-macOS`)](https://github.com/ggml-org/Llama-macOS)** installed in `/Applications/Llama.app` (runs local OpenAI-compatible server at `http://localhost:9931/v1`).
