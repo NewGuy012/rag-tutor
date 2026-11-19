@@ -78,7 +78,7 @@ flowchart LR
 
 ### 1. Prerequisites
 - **Python `>=3.15`**
-- **[Astral `uv`](https://docs.astral.sh/uv/)** (installed at `/opt/homebrew/bin/uv`)
+- **[Astral `uv`](https://docs.astral.sh/uv/)**
 - **[DuckDB](https://duckdb.org/)** (only core runtime dependency; `marimo` is installed via the `dev` dependency group)
 - **[`Llama.app` (`ggml-org/Llama-macOS`)](https://github.com/ggml-org/Llama-macOS)** installed in `/Applications/Llama.app` (runs local OpenAI-compatible server at `http://localhost:9931/v1`).
   - *Note: Even if `Llama.app` is not currently running, all five notebooks include a built-in deterministic fallback synthesizer and local embedding engine so you can run and explore every widget immediately!*
@@ -139,7 +139,7 @@ rag-tutor/
 │   └── rag_tutor/
 │       ├── llm_backend.py         # Llama.app client (:9931/v1) + local embeddings
 │       ├── scratch_rag.py         # Pure-Python cosine similarity & SimpleVectorDB
-│       ├── chunker.py             # Line, fixed-window & Markdown section chunkers
+│       ├── chunker.py             # Fixed-window, Markdown chunkers & corpus loader
 │       ├── duckdb_store.py        # DuckDB FLOAT[128] vector + Okapi BM25 + SQL filters
 │       ├── hybrid_search.py       # RRF-K60 & Min-Max Convex Combination fusion engine
 │       ├── reranker.py            # Stage-2 Cross-Encoder reranker
