@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import http.client
 import json
 import math
 import re
@@ -31,426 +32,143 @@ _NO_REDIRECT_OPENER = urllib.request.build_opener(
 )
 
 STOPWORDS: frozenset[str] = frozenset(
-    {
-        "the",
-        "a",
-        "an",
-        "is",
-        "are",
-        "was",
-        "were",
-        "in",
-        "on",
-        "at",
-        "to",
-        "for",
-        "of",
-        "and",
-        "or",
-        "by",
-        "with",
-        "from",
-        "that",
-        "this",
-        "it",
-        "as",
-        "be",
-        "can",
-        "how",
-        "what",
-        "why",
-        "which",
-        "who",
-        "when",
-        "where",
-        "do",
-        "does",
-        "did",
-        "many",
-        "much",
-        "should",
-        "i",
-        "my",
-        "our",
-        "use",
-        "used",
-    }
+    "the a an is are was were in on at to for of and or by with from that "
+    "this it as be can how what why which who when where do does did many "
+    "much should i my our use used".split()
 )
 
-SEMANTIC_CLUSTERS: list[tuple[str, set[str]]] = [
+SEMANTIC_CLUSTERS: tuple[tuple[str, frozenset[str]], ...] = (
     (
         "ev_efficiency_mpge",
-        {
-            "efficiency",
-            "efficient",
-            "mpge",
-            "gallon",
-            "gasoline",
-            "combustion",
-            "energy",
-            "85%",
-            "90%",
-            "33.7",
-            "135",
-            "kwh",
-            "miles",
-            "consumption",
-            "aerodynamic",
-            "drag",
-            "highway",
-            "velocity",
-            "emissions",
-            "carbon",
-        },
+        frozenset(
+            "efficiency efficient mpge gallon gasoline combustion energy 85% 90% "
+            "33.7 135 kwh miles consumption aerodynamic drag highway velocity "
+            "emissions carbon".split()
+        ),
     ),
     (
         "ev_regen_braking_driving",
-        {
-            "regenerative",
-            "braking",
-            "brake",
-            "brakes",
-            "deceleration",
-            "kinetic",
-            "generator",
-            "70%",
-            "friction",
-            "pedal",
-            "one-pedal",
-            "rotors",
-            "pads",
-            "100000",
-            "150000",
-            "slowing",
-            "stop",
-        },
+        frozenset(
+            "regenerative braking brake brakes deceleration kinetic generator 70% "
+            "friction pedal one-pedal rotors pads 100000 150000 slowing stop".split()
+        ),
     ),
     (
         "ev_battery_chemistry",
-        {
-            "battery",
-            "batteries",
-            "chemistry",
-            "lfp",
-            "phosphate",
-            "iron",
-            "nmc",
-            "nca",
-            "nickel",
-            "cobalt",
-            "manganese",
-            "solid-state",
-            "solid",
-            "electrolyte",
-            "anode",
-            "density",
-            "wh",
-            "kg",
-            "degradation",
-            "cycles",
-        },
+        frozenset(
+            "battery batteries chemistry lfp phosphate iron nmc nca nickel cobalt "
+            "manganese solid-state solid electrolyte anode density wh kg "
+            "degradation cycles".split()
+        ),
     ),
     (
         "ev_charging_800v_nacs",
-        {
-            "charging",
-            "charge",
-            "charger",
-            "fast",
-            "dc",
-            "800-volt",
-            "800v",
-            "400-volt",
-            "350",
-            "kw",
-            "nacs",
-            "j3400",
-            "connector",
-            "soc",
-            "80%",
-            "taper",
-            "plating",
-            "preconditioning",
-            "bidirectional",
-            "v2h",
-            "v2g",
-            "blackout",
-            "household",
-            "grid",
-        },
+        frozenset(
+            "charging charge charger fast dc 800-volt 800v 400-volt 350 kw nacs "
+            "j3400 connector soc 80% taper plating preconditioning bidirectional "
+            "v2h v2g blackout household grid".split()
+        ),
     ),
     (
         "ev_motors_torque_powertrain",
-        {
-            "motor",
-            "motors",
-            "torque",
-            "rpm",
-            "instantaneous",
-            "transmission",
-            "pmsm",
-            "permanent",
-            "magnet",
-            "neodymium",
-            "synchronous",
-            "induction",
-            "electromagnetic",
-            "freewheel",
-            "cogging",
-            "wheel",
-            "wheels",
-        },
+        frozenset(
+            "motor motors torque rpm instantaneous transmission pmsm permanent "
+            "magnet neodymium synchronous induction electromagnetic freewheel "
+            "cogging wheel wheels".split()
+        ),
     ),
     (
         "ev_thermal_winter_heatpump",
-        {
-            "cold",
-            "winter",
-            "freezing",
-            "weather",
-            "temperature",
-            "range",
-            "heat",
-            "pump",
-            "pumps",
-            "cabin",
-            "heating",
-            "heater",
-            "ptc",
-            "resistive",
-            "viscosity",
-            "ambient",
-            "thermal",
-        },
+        frozenset(
+            "cold winter freezing weather temperature range heat pump pumps cabin "
+            "heating heater ptc resistive viscosity ambient thermal".split()
+        ),
     ),
     (
         "ev_history_space_lunar",
-        {
-            "history",
-            "1899",
-            "jamais",
-            "contente",
-            "jenatzy",
-            "belgian",
-            "100",
-            "105.88",
-            "first",
-            "apollo",
-            "lunar",
-            "roving",
-            "moon",
-            "1971",
-            "1972",
-            "silver-zinc",
-        },
+        frozenset(
+            "history 1899 jamais contente jenatzy belgian 100 105.88 first apollo "
+            "lunar roving moon 1971 1972 silver-zinc".split()
+        ),
     ),
     (
         "ev_safety_bms_electrical",
-        {
-            "bms",
-            "management",
-            "isolation",
-            "chassis",
-            "contactor",
-            "contactors",
-            "pyrotechnic",
-            "collision",
-            "orange",
-            "high-voltage",
-            "12-volt",
-            "auxiliary",
-            "dc-to-dc",
-            "converter",
-        },
+        frozenset(
+            "bms management isolation chassis contactor contactors pyrotechnic "
+            "collision orange high-voltage 12-volt auxiliary dc-to-dc "
+            "converter".split()
+        ),
     ),
     (
         "rag_hallucination_grounding",
-        {
-            "rag",
-            "retrieval",
-            "augmented",
-            "generation",
-            "hallucinate",
-            "hallucination",
-            "cutoff",
-            "private",
-            "grounding",
-            "grounded",
-            "context",
-            "prompt",
-            "parametric",
-            "proto-rag-101",
-            "lewis",
-        },
+        frozenset(
+            "rag retrieval augmented generation hallucinate hallucination cutoff "
+            "private grounding grounded context prompt parametric proto-rag-101 "
+            "lewis".split()
+        ),
     ),
     (
         "vectors_cosine_embeddings",
-        {
-            "vector",
-            "vectors",
-            "embedding",
-            "embeddings",
-            "cosine",
-            "similarity",
-            "dot",
-            "product",
-            "norm",
-            "magnitude",
-            "angle",
-            "euclidean",
-            "bge",
-            "dimension",
-            "768",
-            "384",
-            "128",
-            "err-vec-768",
-            "err-chunk-004",
-        },
+        frozenset(
+            "vector vectors embedding embeddings cosine similarity dot product "
+            "norm magnitude angle euclidean bge dimension 768 384 128 err-vec-768 "
+            "err-chunk-004".split()
+        ),
     ),
     (
         "duckdb_sql_storage",
-        {
-            "duckdb",
-            "sql",
-            "database",
-            "table",
-            "array_cosine_similarity",
-            "float",
-            "vss",
-            "hnsw",
-            "fts",
-            "index",
-            "persistent",
-            "memory",
-        },
+        frozenset(
+            "duckdb sql database table array_cosine_similarity float vss hnsw fts "
+            "index persistent memory".split()
+        ),
     ),
     (
         "hybrid_bm25_rrf",
-        {
-            "hybrid",
-            "bm25",
-            "keyword",
-            "lexical",
-            "semantic",
-            "rrf",
-            "reciprocal",
-            "rank",
-            "fusion",
-            "rrf-k60",
-            "bm25-k1-1.2",
-            "k1",
-            "exact",
-            "code",
-            "identifier",
-        },
+        frozenset(
+            "hybrid bm25 keyword lexical semantic rrf reciprocal rank fusion "
+            "rrf-k60 bm25-k1-1.2 k1 exact code identifier".split()
+        ),
     ),
     (
         "reranking_cross_encoder",
-        {
-            "rerank",
-            "reranker",
-            "reranking",
-            "cross-encoder",
-            "bi-encoder",
-            "ms-marco",
-            "stage",
-            "stage2-rerank-15to3",
-            "noise",
-            "distractor",
-            "precision",
-            "lost",
-            "middle",
-            "attention",
-        },
+        frozenset(
+            "rerank reranker reranking cross-encoder bi-encoder ms-marco stage "
+            "stage2-rerank-15to3 noise distractor precision lost middle "
+            "attention".split()
+        ),
     ),
     (
         "agentic_rag_workflow",
-        {
-            "agent",
-            "agentic",
-            "multi-hop",
-            "multi-step",
-            "decompose",
-            "decomposition",
-            "planner",
-            "sub-query",
-            "iterative",
-            "verify",
-            "verification",
-            "verifier",
-            "faithfulness",
-            "audit",
-            "citation",
-        },
+        frozenset(
+            "agent agentic multi-hop multi-step decompose decomposition planner "
+            "sub-query iterative verify verification verifier faithfulness audit "
+            "citation".split()
+        ),
     ),
     (
         "chunking_splitting",
-        {
-            "chunk",
-            "chunks",
-            "chunking",
-            "split",
-            "splitting",
-            "overlap",
-            "boundary",
-            "window",
-            "token",
-            "tokens",
-            "section",
-            "markdown",
-            "character",
-            "paragraph",
-        },
+        frozenset(
+            "chunk chunks chunking split splitting overlap boundary window token "
+            "tokens section markdown character paragraph".split()
+        ),
     ),
     (
         "graph_rag_knowledge",
-        {
-            "graph",
-            "graphrag",
-            "knowledge",
-            "entity",
-            "entities",
-            "triple",
-            "triples",
-            "relation",
-            "relationship",
-            "relationships",
-            "hop",
-            "hops",
-            "traverse",
-            "traversal",
-            "subgraph",
-            "node",
-            "edge",
-        },
+        frozenset(
+            "graph graphrag knowledge entity entities triple triples relation "
+            "relationship relationships hop hops traverse traversal subgraph node "
+            "edge".split()
+        ),
     ),
     (
         "modular_query_expansion",
-        {
-            "modular",
-            "hyde",
-            "hypothetical",
-            "multi-query",
-            "expansion",
-            "expand",
-            "convex",
-            "linear",
-            "normalization",
-            "splade",
-            "dense",
-            "sparse",
-            "metadata",
-            "filter",
-            "filtering",
-            "qdrant",
-            "weaviate",
-            "pinecone",
-            "elasticsearch",
-            "cohere",
-            "convex-alpha-70",
-        },
+        frozenset(
+            "modular hyde hypothetical multi-query expansion expand convex linear "
+            "normalization splade dense sparse metadata filter filtering qdrant "
+            "weaviate pinecone elasticsearch cohere convex-alpha-70".split()
+        ),
     ),
-]
+)
 
 
 def tokenize(
@@ -488,13 +206,20 @@ def split_sentences(text: str, min_len: int = 12) -> list[str]:
     ]
 
 
+def embedding_band_bounds(dim: int) -> tuple[int, int]:
+    """Return `(num_clusters, lex_end)` boundaries partitioning a `dim`-D vector."""
+    num_clusters = min(len(SEMANTIC_CLUSTERS), dim // 3)
+    lex_end = max(num_clusters, min(dim - max(1, dim // 4), int(dim * 0.6)))
+    return num_clusters, lex_end
+
+
 class LocalEmbeddingEngine:
-    """Deterministic 128-D local embedding engine (concept clusters + token hashes + 3-grams)."""
+    """Deterministic local embedding engine (concept clusters + token hashes + 3-grams)."""
 
     def __init__(self, dim: int = 128) -> None:
-        if dim < 32:
+        self.dim = int(dim)
+        if self.dim < 32:
             raise ValueError("Embedding dimension must be at least 32.")
-        self.dim = dim
 
     def embed(self, text: str) -> list[float]:
         """Compute a unit-normalized float vector of length `self.dim`."""
@@ -504,8 +229,8 @@ class LocalEmbeddingEngine:
 
         vec = [0.0] * self.dim
         tokens = tokenize(cleaned)
+        num_clusters, lex_end = embedding_band_bounds(self.dim)
 
-        num_clusters = min(len(SEMANTIC_CLUSTERS), self.dim // 3)
         for idx in range(num_clusters):
             _, cluster_words = SEMANTIC_CLUSTERS[idx]
             matches = sum(1 for t in tokens if t in cluster_words)
@@ -513,30 +238,34 @@ class LocalEmbeddingEngine:
                 vec[idx] = 1.8 * (1.0 + math.log1p(matches))
 
         lex_start = num_clusters
-        lex_span = max(16, int(self.dim * 0.6) - lex_start)
-        for tok in tokens:
-            if tok in STOPWORDS:
-                continue
-            digest = hashlib.md5(tok.encode("utf-8"), usedforsecurity=False).digest()
-            slot1 = lex_start + (int.from_bytes(digest[0:2], "little") % lex_span)
-            sign1 = 1.0 if (digest[2] & 1) == 0 else -1.0
-            slot2 = lex_start + (int.from_bytes(digest[4:6], "little") % lex_span)
-            sign2 = 1.0 if (digest[6] & 1) == 0 else -1.0
-            weight = 1.6 if ("-" in tok or any(c.isdigit() for c in tok)) else 1.0
-            vec[slot1] += sign1 * weight
-            vec[slot2] += sign2 * (0.5 * weight)
+        lex_span = lex_end - lex_start
+        if lex_span > 0:
+            for tok in tokens:
+                if tok in STOPWORDS:
+                    continue
+                digest = hashlib.md5(
+                    tok.encode("utf-8"), usedforsecurity=False
+                ).digest()
+                slot1 = lex_start + (int.from_bytes(digest[0:2], "little") % lex_span)
+                sign1 = 1.0 if (digest[2] & 1) == 0 else -1.0
+                slot2 = lex_start + (int.from_bytes(digest[4:6], "little") % lex_span)
+                sign2 = 1.0 if (digest[6] & 1) == 0 else -1.0
+                weight = 1.6 if ("-" in tok or any(c.isdigit() for c in tok)) else 1.0
+                vec[slot1] += sign1 * weight
+                vec[slot2] += sign2 * (0.5 * weight)
 
-        ngram_start = lex_start + lex_span
-        ngram_span = max(8, self.dim - ngram_start)
-        compact = re.sub(r"\s+", " ", cleaned.lower())
-        for i in range(max(0, len(compact) - 2)):
-            h = int.from_bytes(
-                hashlib.md5(
-                    compact[i : i + 3].encode("utf-8"), usedforsecurity=False
-                ).digest()[:2],
-                "little",
-            )
-            vec[ngram_start + (h % ngram_span)] += 0.25
+        ngram_start = lex_end
+        ngram_span = self.dim - ngram_start
+        if ngram_span > 0:
+            compact = re.sub(r"\s+", " ", cleaned.lower())
+            for i in range(max(0, len(compact) - 2)):
+                h = int.from_bytes(
+                    hashlib.md5(
+                        compact[i : i + 3].encode("utf-8"), usedforsecurity=False
+                    ).digest()[:2],
+                    "little",
+                )
+                vec[ngram_start + (h % ngram_span)] += 0.25
 
         norm = vector_norm(vec)
         return [round(x / norm, 6) for x in vec] if norm > 0.0 else vec
@@ -560,12 +289,17 @@ class LlamaMacOSClient:
         base_url: str = DEFAULT_LLAMA_MACOS_URL,
         timeout_seconds: float = 45.0,
     ) -> None:
+        if any(c.isspace() or ord(c) < 32 for c in base_url):
+            raise ValueError(f"Invalid loopback HTTP(S) base_url: {base_url!r}")
         cleaned_url = base_url.rstrip("/")
         parsed = urllib.parse.urlparse(cleaned_url)
+        port = parsed.port
         if (
             parsed.scheme not in ("http", "https")
             or not parsed.netloc
             or parsed.hostname not in _LOOPBACK_HOSTS
+            or (port is not None and not (1 <= port <= 65535))
+            or ".." in parsed.path.split("/")
             or any(
                 (
                     parsed.username,
@@ -586,7 +320,7 @@ class LlamaMacOSClient:
         timeout: float,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not path.startswith("/"):
+        if not path.startswith("/") or any(c.isspace() or ord(c) < 32 for c in path):
             raise ValueError(f"Invalid API path: {path!r}")
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         headers = {"Content-Type": "application/json"} if payload is not None else {}
@@ -621,7 +355,7 @@ class LlamaMacOSClient:
                 models,
                 f"Connected to Llama.app at {self.base_url} ({len(models)} model(s) found)",
             )
-        except (OSError, TypeError, ValueError) as exc:
+        except (OSError, http.client.HTTPException, TypeError, ValueError) as exc:
             return (
                 False,
                 [],
@@ -670,18 +404,25 @@ class LlamaMacOSClient:
                         timeout=self.timeout_seconds,
                         payload=body,
                     )
-                    choices = resp_json.get("choices") or []
-                    if choices and isinstance(choices[0], dict):
-                        content = str(
-                            (choices[0].get("message") or {}).get("content") or ""
-                        ).strip()
+                    choices = resp_json.get("choices")
+                    if (
+                        isinstance(choices, list)
+                        and choices
+                        and isinstance(choices[0], dict)
+                    ):
+                        msg = choices[0].get("message")
+                        content = (
+                            str(msg.get("content") or "").strip()
+                            if isinstance(msg, dict)
+                            else ""
+                        )
                         return LLMGenerationResult(
                             content=content,
                             model=selected_model,
                             backend="llama-macos",
                             latency_ms=round((time.perf_counter() - t0) * 1000.0, 1),
                         )
-                except OSError, TypeError, ValueError:
+                except (OSError, http.client.HTTPException, TypeError, ValueError):
                     pass
 
         fallback_text = self._synthesize_educational_response(
