@@ -377,31 +377,43 @@ TOPIC_PALETTE: tuple[tuple[str, str, frozenset[str]], ...] = (
     (
         "Battery & Chemistry",
         "#c084fc",
-        frozenset("battery lfp nmc solid-state electrolyte density".split()),
+        frozenset({"battery", "lfp", "nmc", "solid-state", "electrolyte", "density"}),
     ),
     (
         "Charging & 800V/V2H",
         "#38bdf8",
         frozenset(
-            "charging 800-volt nacs preconditioning bidirectional v2h soc".split()
+            {
+                "charging",
+                "800-volt",
+                "nacs",
+                "preconditioning",
+                "bidirectional",
+                "v2h",
+                "soc",
+            }
         ),
     ),
     (
         "Motors & Regen Braking",
         "#2dd4bf",
         frozenset(
-            "regenerative braking motor torque pmsm induction pedal".split()
+            {"regenerative", "braking", "motor", "torque", "pmsm", "induction", "pedal"}
         ),
     ),
     (
         "Efficiency & Winter Thermal",
         "#fbbf24",
-        frozenset("mpge efficiency aerodynamic heat pump winter cold".split()),
+        frozenset(
+            {"mpge", "efficiency", "aerodynamic", "heat", "pump", "winter", "cold"}
+        ),
     ),
     (
         "History, Safety & BMS",
         "#fb7185",
-        frozenset("1899 jamais apollo lunar bms pyrotechnic 12-volt".split()),
+        frozenset(
+            {"1899", "jamais", "apollo", "lunar", "bms", "pyrotechnic", "12-volt"}
+        ),
     ),
 )
 

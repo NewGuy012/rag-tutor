@@ -315,8 +315,7 @@ def _(
             mo.Html(_attn_html),
             mo.md(
                 "| Stage-2 Rank | Rank Shift from Stage-1 | Cross-Encoder Score | Document & Section | Reranker Interaction Signals |\n"
-                "| :--- | :--- | :--- | :--- | :--- |\n"
-                + "\n".join(_rerank_rows)
+                "| :--- | :--- | :--- | :--- | :--- |\n" + "\n".join(_rerank_rows)
             ),
         ]
     )
@@ -400,8 +399,7 @@ def _(
                 + ", ".join(f"`{html.escape(sq)}`" for sq in _trace.planned_sub_queries)
                 + f"\n- **Sufficiency Audit**: {'✅ Passed' if _trace.sufficiency_passed else '⚠️ Low Confidence'} — _{html.escape(_trace.sufficiency_note)}_\n\n"
                 "| Step | Sub-Query Executed | Planner Reason | Top Reranked Evidence | Cross-Encoder Score |\n"
-                "| :--- | :--- | :--- | :--- | :--- |\n"
-                + _step_rows
+                "| :--- | :--- | :--- | :--- | :--- |\n" + _step_rows
             ),
             mo.md(
                 f"### Step 3: Grounded Answer (`{html.escape(_trace.llm_model_used)}` · `{_trace.latency_ms:.0f} ms`)\n\n"

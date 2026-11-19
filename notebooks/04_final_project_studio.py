@@ -199,11 +199,7 @@ def _(
         return [
             (
                 f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
-                float(
-                    c.rerank_score
-                    if hasattr(c, "rerank_score")
-                    else c.rrf_score
-                ),
+                float(c.rerank_score if hasattr(c, "rerank_score") else c.rrf_score),
                 c.text,
             )
             for c in items

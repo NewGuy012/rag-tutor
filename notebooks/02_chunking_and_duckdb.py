@@ -188,7 +188,9 @@ def _(
                 """
             ),
             mo.hstack([doc_selector, strategy_selector], justify="start", gap=2),
-            mo.hstack([chunk_size_slider, chunk_overlap_slider], justify="start", gap=2),
+            mo.hstack(
+                [chunk_size_slider, chunk_overlap_slider], justify="start", gap=2
+            ),
             _kpi_row,
             mo.Html(_timeline_svg),
             mo.accordion(

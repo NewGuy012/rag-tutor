@@ -233,8 +233,7 @@ def _(
                     mo.Html(_graph_svg),
                     mo.md(
                         "| Hop | Subject | Predicate | Object | Grounded Source Chunk |\n"
-                        "| :--- | :--- | :--- | :--- | :--- |\n"
-                        + _triple_rows
+                        "| :--- | :--- | :--- | :--- | :--- |\n" + _triple_rows
                     ),
                 ]
             ),
@@ -250,8 +249,7 @@ def _(
                     ),
                     mo.md(
                         "| Rank | Chunk | `department` | `updated_year` | Cosine Score | Source Section |\n"
-                        "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
-                        + _sql_rows
+                        "| :--- | :--- | :--- | :--- | :--- | :--- |\n" + _sql_rows
                     ),
                 ]
             ),
@@ -354,8 +352,7 @@ def _(
             mo.Html(_fusion_svg),
             mo.md(
                 "| Convex Rank | Chunk | Raw → Norm Vector | Raw → Norm BM25 | Convex Score | RRF Score | Source Section |\n"
-                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
-                + _conv_rows
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n" + _conv_rows
             ),
         ]
     )
@@ -515,8 +512,7 @@ def _(
             mo.md(
                 f"### Final Ranked Context Sent to LLM (`{len(_trace.final_candidates)}` Chunks)\n"
                 "| Rank | Chunk | Active Retrieval Provenance | Stage-1/2 Fused Score | Stage-2 Rerank Score | Document & Section |\n"
-                "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
-                + _cand_rows
+                "| :--- | :--- | :--- | :--- | :--- | :--- |\n" + _cand_rows
             ),
             mo.md(
                 f"### Grounded Answer (`{html.escape(_trace.llm_model_used)}` · `{_trace.latency_ms:.0f} ms`)"

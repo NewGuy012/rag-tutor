@@ -165,8 +165,7 @@ def _(
     def _quote(text: str) -> str:
         return (
             "\n".join(
-                f"> {line}" if line else ">"
-                for line in html.escape(text).splitlines()
+                f"> {line}" if line else ">" for line in html.escape(text).splitlines()
             )
             or "> "
         )
@@ -380,7 +379,9 @@ def _(
         for idx, (chunk, score) in enumerate(_retrieved)
     )
 
-    _prompt_pre = html.escape(f"SYSTEM PROMPT:\n{_sys_prompt}\n\nUSER PROMPT:\n{_usr_prompt}")
+    _prompt_pre = html.escape(
+        f"SYSTEM PROMPT:\n{_sys_prompt}\n\nUSER PROMPT:\n{_usr_prompt}"
+    )
     _tabs = mo.ui.tabs(
         {
             "🌌 2D Embedding Space & 128-D Barcode": mo.vstack(

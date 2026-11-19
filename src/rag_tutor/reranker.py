@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 import re
 from dataclasses import dataclass
@@ -54,7 +55,7 @@ class CrossEncoderReranker:
         )
 
         bigram_hits = len(
-            set(zip(q_tokens, q_tokens[1:])) & set(zip(c_tokens, c_tokens[1:]))
+            set(itertools.pairwise(q_tokens)) & set(itertools.pairwise(c_tokens))
         )
         bigram_bonus = min(0.25, bigram_hits * 0.12)
 
@@ -72,7 +73,9 @@ class CrossEncoderReranker:
             intent_bonus += 0.14
             reasons.append("numeric answer alignment")
 
-        if any(w in q_lower for w in _CODE_INTENTS) and _TECH_CODE_RE.search(chunk_text):
+        if any(w in q_lower for w in _CODE_INTENTS) and _TECH_CODE_RE.search(
+            chunk_text
+        ):
             intent_bonus += 0.16
             reasons.append("exact technical identifier match")
 
