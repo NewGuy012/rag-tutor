@@ -70,7 +70,7 @@ def _(llm_client, mo):
 
 
 @app.cell
-def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
+def _(is_online, html, mo, model_dropdown, status_msg, thinking_toggle):
     _badge = (
         "🟢 **Llama.app Connected**"
         if is_online
@@ -87,24 +87,26 @@ def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
             LLM --> Ans["Grounded Cited Answer"]
         """
     )
-    mo.md(
-        f"""
-        # 🦉 RAG Tutor — Notebook 1: The Basic Hows & Whys
-        ### *Building & Visualizing a Retrieval-Augmented Generation System from Scratch*
+    mo.vstack(
+        [
+            mo.md(
+                """
+                # 🦉 RAG Tutor — Notebook 1: The Basic Hows & Whys
+                ### *Building & Visualizing a Retrieval-Augmented Generation System from Scratch*
 
-        Welcome to **Notebook 1** of the interactive RAG curriculum! Inspired by Xuan-Son Nguyen's
-        [*Code a simple RAG from scratch*](https://huggingface.co/blog/ngxson/make-your-own-rag) and interactive
-        explorers from the [**Marimo Gallery**](https://marimo.io/gallery), this notebook demystifies how RAG works
-        using **pure Python** and an Electric Vehicle knowledge base (`data/ev-facts.txt`)—before we touch any
-        external vector databases or advanced production pipelines.
-
-        {_overview_mermaid}
-
-        ---
-        **Local LLM Backend (`http://localhost:9931/v1`)**: {_badge} — _{status_msg}_
-
-        {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
-        """
+                Welcome to **Notebook 1** of the interactive RAG curriculum! Inspired by Xuan-Son Nguyen's
+                [*Code a simple RAG from scratch*](https://huggingface.co/blog/ngxson/make-your-own-rag) and interactive
+                explorers from the [**Marimo Gallery**](https://marimo.io/gallery), this notebook demystifies how RAG works
+                using **pure Python** and an Electric Vehicle knowledge base (`data/ev-facts.txt`)—before we touch any
+                external vector databases or advanced production pipelines.
+                """
+            ),
+            _overview_mermaid,
+            mo.md(
+                f"---\n**Local LLM Backend (`http://localhost:9931/v1`)**: {_badge} — _{html.escape(status_msg)}_"
+            ),
+            mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2),
+        ]
     )
 
 
@@ -133,6 +135,7 @@ def _(mo):
 
 @app.cell
 def _(
+    build_rag_prompt,
     hallucination_query_picker,
     html,
     llm_client,
@@ -150,50 +153,58 @@ def _(
         retrieved_context=[],
     )
 
+    _with_sys, _with_usr = build_rag_prompt(_q_text, [_fact_context])
     _with_rag_res = llm_client.generate(
-        system_prompt=(
-            "You are a helpful assistant. Answer the user's question using ONLY "
-            f"the following verified context:\n - {_fact_context}"
-        ),
-        user_prompt=_q_text,
+        system_prompt=_with_sys,
+        user_prompt=_with_usr,
         model=model_dropdown.value,
         enable_thinking=thinking_toggle.value,
         retrieved_context=[_fact_context],
     )
 
+    def _quote(text: str) -> str:
+        return (
+            "\n".join(
+                f"> {line}" if line else ">"
+                for line in html.escape(text).splitlines()
+            )
+            or "> "
+        )
+
     _no_rag_card = mo.callout(
         mo.md(
-            f"**❌ Without RAG (Parametric Memory Only)**\n\n"
-            f"*Context Injected:* `None`\n\n"
-            f"> {html.escape(_no_rag_res.content)}"
+            "**❌ Without RAG (Parametric Memory Only)**\n\n"
+            "*Context Injected:* `None`\n\n" + _quote(_no_rag_res.content)
         ),
         kind="warn",
     )
     _with_rag_card = mo.callout(
         mo.md(
-            f"**✅ With RAG (Grounded Context Injected)**\n\n"
+            "**✅ With RAG (Grounded Context Injected)**\n\n"
             f"*Verified Fact:* `{html.escape(_fact_context)}`\n\n"
-            f"> {html.escape(_with_rag_res.content)}"
+            + _quote(_with_rag_res.content)
         ),
         kind="success",
     )
 
-    mo.md(
-        f"""
-        ## 1. Why Do We Need RAG? (The Hallucination & Cutoff Problem)
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 1. Why Do We Need RAG? (The Hallucination & Cutoff Problem)
 
-        Large Language Models (LLMs) store general world knowledge inside their weights (**parametric memory**),
-        but they have three fundamental blind spots:
-        1. **Private / Internal Data**: They have never seen your team's private documents or custom error codes.
-        2. **Knowledge Cutoffs**: They do not know facts created after their training finished.
-        3. **Confident Hallucinations**: Without grounded context, an LLM will often guess or fabricate details.
+                Large Language Models (LLMs) store general world knowledge inside their weights (**parametric memory**),
+                but they have three fundamental blind spots:
+                1. **Private / Internal Data**: They have never seen your team's private documents or custom error codes.
+                2. **Knowledge Cutoffs**: They do not know facts created after their training finished.
+                3. **Confident Hallucinations**: Without grounded context, an LLM will often guess or fabricate details.
 
-        Select a test question below to compare **Ungrounded Generation (No RAG)** vs. **Grounded Generation (With RAG)**:
-
-        {hallucination_query_picker}
-
-        {mo.hstack([_no_rag_card, _with_rag_card], widths="equal", gap=2)}
-        """
+                Select a test question below to compare **Ungrounded Generation (No RAG)** vs. **Grounded Generation (With RAG)**:
+                """
+            ),
+            hallucination_query_picker,
+            mo.hstack([_no_rag_card, _with_rag_card], widths="equal", gap=2),
+        ]
     )
 
 
@@ -259,25 +270,26 @@ def _(
         gap=2,
     )
 
-    mo.md(
-        f"""
-        ## 2. How Retrieval Works: Interactive 2D Vector Compass & Metric Gauges
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 2. How Retrieval Works: Interactive 2D Vector Compass & Metric Gauges
 
-        To find which facts in our knowledge base match a user's question, we convert text into
-        **Embedding Vectors** (lists of floating-point numbers representing meaning) and measure the angle
-        between them using **Cosine Similarity**:
+                To find which facts in our knowledge base match a user's question, we convert text into
+                **Embedding Vectors** (lists of floating-point numbers representing meaning) and measure the angle
+                between them using **Cosine Similarity**:
 
-        $$\\text{{cosine\\_similarity}}(A, B) = \\frac{{A \\cdot B}}{{\\|A\\| \\cdot \\|B\\|}} = \\frac{{\\sum_{{i=1}}^{{n}} A_i B_i}}{{\\sqrt{{\\sum_{{i=1}}^{{n}} A_i^2}} \\sqrt{{\\sum_{{i=1}}^{{n}} B_i^2}}}}$$
+                $$\\text{cosine\\_similarity}(A, B) = \\frac{A \\cdot B}{\\|A\\| \\cdot \\|B\\|} = \\frac{\\sum_{i=1}^{n} A_i B_i}{\\sqrt{\\sum_{i=1}^{n} A_i^2} \\sqrt{\\sum_{i=1}^{n} B_i^2}}$$
 
-        Drag the sliders below to move 2D vectors **A** (teal) and **B** (amber), inspect the **orthogonal projection**
-        and **angle arc $\\theta$**, and compare **Cosine Similarity** against **Dot Product** and **Euclidean Distance**:
-
-        {mo.hstack([vec_a_x, vec_a_y, vec_b_x, vec_b_y], justify="start", gap=2)}
-
-        {_stat_cards}
-
-        {mo.Html(_compass_html)}
-        """
+                Drag the sliders below to move 2D vectors **A** (teal) and **B** (amber), inspect the **orthogonal projection**
+                and **angle arc $\\theta$**, and compare **Cosine Similarity** against **Dot Product** and **Euclidean Distance**:
+                """
+            ),
+            mo.hstack([vec_a_x, vec_a_y, vec_b_x, vec_b_y], justify="start", gap=2),
+            _stat_cards,
+            mo.Html(_compass_html),
+        ]
     )
 
 
@@ -368,56 +380,58 @@ def _(
         for idx, (chunk, score) in enumerate(_retrieved)
     )
 
+    _prompt_pre = html.escape(f"SYSTEM PROMPT:\n{_sys_prompt}\n\nUSER PROMPT:\n{_usr_prompt}")
     _tabs = mo.ui.tabs(
         {
             "🌌 2D Embedding Space & 128-D Barcode": mo.vstack(
                 [mo.Html(_space_map_html), mo.Html(_barcode_html)]
             ),
             "📋 Top-N Retrieved Chunks Table": mo.md(
-                f"""
-                | Rank | Cosine Similarity | Retrieved Fact from `ev-facts.txt` |
-                | :--- | :--- | :--- |
-                {_rows_md}
-                """
+                "| Rank | Cosine Similarity | Retrieved Fact from `ev-facts.txt` |\n"
+                "| :--- | :--- | :--- |\n" + _rows_md
             ),
-            "🔍 Augmented System Prompt": mo.md(
-                f"""
-                ```text
-                SYSTEM PROMPT:
-                {_sys_prompt}
-
-                USER PROMPT:
-                {_usr_prompt}
-                ```
-                """
+            "🔍 Augmented System Prompt": mo.Html(
+                '<pre style="background:#020617;color:#e2e8f0;padding:12px;border-radius:8px;'
+                f'border:1px solid #1e293b;white-space:pre-wrap;font-size:12px;">{_prompt_pre}</pre>'
             ),
         }
     )
 
-    mo.md(
-        f"""
-        ## 3. Your First 50-Line RAG from Scratch (`ev-facts.txt`)
+    _ans_quoted = (
+        "\n".join(
+            f"> {line}" if line else ">"
+            for line in html.escape(_gen.content).splitlines()
+        )
+        or "> "
+    )
 
-        Following [Xuan-Son Nguyen's Hugging Face guide](https://huggingface.co/blog/ngxson/make-your-own-rag),
-        we have indexed all **{len(scratch_db.entries)} facts** from `data/ev-facts.txt` into a plain Python list:
-        `VECTOR_DB = [(chunk_text, embedding_vector), ...]`.
+    mo.vstack(
+        [
+            mo.md(
+                f"""
+                ## 3. Your First 50-Line RAG from Scratch (`ev-facts.txt`)
 
-        Type any question about electric vehicles below (e.g., *"What is the difference between LFP and NMC batteries?"*,
-        *"Why do 800-volt EV architectures charge faster?"*, *"How do automotive heat pumps help in cold winter weather?"*,
-        *"Why does DC fast charging slow down above 80% state of charge?"*) and watch the **2D Embedding Space Map**
-        and **128-D Barcode** react live:
+                Following [Xuan-Son Nguyen's Hugging Face guide](https://huggingface.co/blog/ngxson/make-your-own-rag),
+                we have indexed all **{len(scratch_db.entries)} facts** from `data/ev-facts.txt` into a plain Python list:
+                `VECTOR_DB = [(chunk_text, embedding_vector), ...]`.
 
-        {user_query_input}
-        {mo.hstack([top_n_slider, inspect_rank_dropdown], justify="start", gap=3)}
-
-        {_tabs}
-
-        ### Grounded LLM Response (`{_gen.model}` · `{_gen.latency_ms:.0f} ms`)
-        > {html.escape(_gen.content)}
-
-        ---
-        **Next Up**: In `notebooks/02_chunking_and_duckdb.py`, we'll visually explore document chunking & sliding overlap on a **Document Timeline Minimap** and index our vectors into **DuckDB**!
-        """
+                Type any question about electric vehicles below (e.g., *"What is the difference between LFP and NMC batteries?"*,
+                *"Why do 800-volt EV architectures charge faster?"*, *"How do automotive heat pumps help in cold winter weather?"*,
+                *"Why does DC fast charging slow down above 80% state of charge?"*) and watch the **2D Embedding Space Map**
+                and **128-D Barcode** react live:
+                """
+            ),
+            user_query_input,
+            mo.hstack([top_n_slider, inspect_rank_dropdown], justify="start", gap=3),
+            _tabs,
+            mo.md(
+                f"### Grounded LLM Response (`{html.escape(_gen.model)}` · `{_gen.latency_ms:.0f} ms`)\n\n"
+                + _ans_quoted
+            ),
+            mo.md(
+                "---\n**Next Up**: In `notebooks/02_chunking_and_duckdb.py`, we'll visually explore document chunking & sliding overlap on a **Document Timeline Minimap** and index our vectors into **DuckDB**!"
+            ),
+        ]
     )
 
 

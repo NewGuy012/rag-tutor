@@ -167,32 +167,39 @@ def _(
             """
         )
 
-    mo.md(
-        f"""
-        # 🦆 RAG Tutor — Notebook 2: Document Chunking & DuckDB Vector Store
+    mo.vstack(
+        [
+            mo.md(
+                """
+                # 🦆 RAG Tutor — Notebook 2: Document Chunking & DuckDB Vector Store
 
-        In Notebook 1, `ev-facts.txt` was already split into one neat sentence per line.
-        Real-world knowledge bases contain multi-section Markdown guides, PDFs, and runbooks.
-        If you embed an entire 10-page document into a single vector, its meaning becomes blurry;
-        if you slice it into tiny 30-character fragments, sentences lose their surrounding context.
+                In Notebook 1, `ev-facts.txt` was already split into one neat sentence per line.
+                Real-world knowledge bases contain multi-section Markdown guides, PDFs, and runbooks.
+                If you embed an entire 10-page document into a single vector, its meaning becomes blurry;
+                if you slice it into tiny 30-character fragments, sentences lose their surrounding context.
 
-        ---
-        ## 1. Interactive Document Chunking & Overlap Lab
+                ---
+                ## 1. Interactive Document Chunking & Overlap Lab
 
-        Adjust **Chunk Strategy**, **Max Chunk Size**, and **Sliding Overlap** below.
-        Watch the **Document Minimap** to see how **Markdown Section-Aware Chunking** aligns cleanly with
-        heading boundaries (`#`, `##`, `###`), whereas **Fixed-Character Sliding Windows** slice across sections
-        and rely on **amber overlap zones** to preserve boundary context:
-
-        {mo.hstack([doc_selector, strategy_selector], justify="start", gap=2)}
-        {mo.hstack([chunk_size_slider, chunk_overlap_slider], justify="start", gap=2)}
-
-        {_kpi_row}
-
-        {mo.Html(_timeline_svg)}
-
-        {mo.accordion({"📄 Expand to Inspect Individual Chunk Cards (" + str(len(preview_chunks)) + " chunks)": mo.Html("".join(_cards))}, expanded=True)}
-        """
+                Adjust **Chunk Strategy**, **Max Chunk Size**, and **Sliding Overlap** below.
+                Watch the **Document Minimap** to see how **Markdown Section-Aware Chunking** aligns cleanly with
+                heading boundaries (`#`, `##`, `###`), whereas **Fixed-Character Sliding Windows** slice across sections
+                and rely on **amber overlap zones** to preserve boundary context:
+                """
+            ),
+            mo.hstack([doc_selector, strategy_selector], justify="start", gap=2),
+            mo.hstack([chunk_size_slider, chunk_overlap_slider], justify="start", gap=2),
+            _kpi_row,
+            mo.Html(_timeline_svg),
+            mo.accordion(
+                {
+                    f"📄 Expand to Inspect Individual Chunk Cards ({len(preview_chunks)} chunks)": mo.Html(
+                        "".join(_cards)
+                    )
+                },
+                expanded=True,
+            ),
+        ]
     )
 
 
@@ -296,40 +303,43 @@ def _(
         _sql_rows = [{"error": str(_exc)}]
         _sql_status = "⚠️ SQL Error"
 
-    mo.md(
-        f"""
-        ## 2. Graduating from Python Lists to DuckDB (`FLOAT[{embedder.dim}]`)
+    mo.vstack(
+        [
+            mo.md(
+                f"""
+                ## 2. Graduating from Python Lists to DuckDB (`FLOAT[{embedder.dim}]`)
 
-        All **{indexed_count} chunks** across the {len(doc_files)} Markdown guides in `data/sample_docs/` are now
-        embedded and stored in a **DuckDB** table (`rag_chunks`) with fixed-size `FLOAT[{embedder.dim}]` vectors:
+                All **{indexed_count} chunks** across the {len(doc_files)} Markdown guides in `data/sample_docs/` are now
+                embedded and stored in a **DuckDB** table (`rag_chunks`) with fixed-size `FLOAT[{embedder.dim}]` vectors:
 
-        ```sql
-        CREATE TABLE rag_chunks (
-            chunk_id INTEGER PRIMARY KEY,
-            doc_source VARCHAR,
-            section_title VARCHAR,
-            chunk_text VARCHAR,
-            char_length INTEGER,
-            department VARCHAR,
-            updated_year INTEGER,
-            embedding FLOAT[{embedder.dim}]
-        );
-        ```
+                ```sql
+                CREATE TABLE rag_chunks (
+                    chunk_id INTEGER PRIMARY KEY,
+                    doc_source VARCHAR,
+                    section_title VARCHAR,
+                    chunk_text VARCHAR,
+                    char_length INTEGER,
+                    department VARCHAR,
+                    updated_year INTEGER,
+                    embedding FLOAT[{embedder.dim}]
+                );
+                ```
 
-        ### Live Vector Search in DuckDB SQL (`array_cosine_similarity`)
-        {duck_query_input}
-        {duck_top_k}
-
-        {mo.Html(_hits_card)}
-
-        ---
-        ### Interactive DuckDB SQL Playground
-        Pick a pre-built analytical recipe or write your own SQL query against `rag_chunks`:
-        {sql_recipe_picker}
-        {sql_playground_input}
-        **Status**: {_sql_status}
-        {mo.ui.table(_sql_rows, selection=None)}
-        """
+                ### Live Vector Search in DuckDB SQL (`array_cosine_similarity`)
+                """
+            ),
+            duck_query_input,
+            duck_top_k,
+            mo.Html(_hits_card),
+            mo.md(
+                "---\n### Interactive DuckDB SQL Playground\n"
+                "Pick a pre-built analytical recipe or write your own SQL query against `rag_chunks`:"
+            ),
+            sql_recipe_picker,
+            sql_playground_input,
+            mo.md(f"**Status**: {_sql_status}"),
+            mo.ui.table(_sql_rows, selection=None),
+        ]
     )
 
 

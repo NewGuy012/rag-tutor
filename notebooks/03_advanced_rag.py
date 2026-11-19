@@ -73,26 +73,30 @@ def _(llm_client, mo):
 
 
 @app.cell
-def _(is_online, mo, model_dropdown, status_msg, thinking_toggle):
+def _(html, is_online, mo, model_dropdown, status_msg, thinking_toggle):
     _badge = (
         "🟢 **Llama.app Connected**"
         if is_online
         else "🟡 **Offline Educational Fallback Active**"
     )
-    mo.md(
-        f"""
-        # 🚀 RAG Tutor — Notebook 3: Common Improvements for Production
-        ### *Visualizing Hybrid Search (RRF), Cross-Encoder Slopegraphs & Agentic RAG*
+    mo.vstack(
+        [
+            mo.md(
+                """
+                # 🚀 RAG Tutor — Notebook 3: Common Improvements for Production
+                ### *Visualizing Hybrid Search (RRF), Cross-Encoder Slopegraphs & Agentic RAG*
 
-        A basic 50-line vector RAG works great for simple demos, but in production systems it runs into three classic failure modes:
-        1. **Exact Keyword Blindness**: Dense vectors compress a whole passage into one vector and often miss exact error codes, part numbers, or function names (solved by **Hybrid Search**).
-        2. **Noisy Bi-Encoder Distractors**: Chunks that mention the same general topic without answering the specific question sneak into the Top $K$ (solved by **Cross-Encoder Reranking**).
-        3. **Multi-Hop & Unverified Answers**: Single-shot retrieval fails when a user asks a multi-part question spanning multiple documents (solved by **Agentic RAG**).
-
-        ---
-        **Local LLM Backend**: {_badge} — _{status_msg}_
-        {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
-        """
+                A basic 50-line vector RAG works great for simple demos, but in production systems it runs into three classic failure modes:
+                1. **Exact Keyword Blindness**: Dense vectors compress a whole passage into one vector and often miss exact error codes, part numbers, or function names (solved by **Hybrid Search**).
+                2. **Noisy Bi-Encoder Distractors**: Chunks that mention the same general topic without answering the specific question sneak into the Top $K$ (solved by **Cross-Encoder Reranking**).
+                3. **Multi-Hop & Unverified Answers**: Single-shot retrieval fails when a user asks a multi-part question spanning multiple documents (solved by **Agentic RAG**).
+                """
+            ),
+            mo.md(
+                f"---\n**Local LLM Backend**: {_badge} — _{html.escape(status_msg)}_"
+            ),
+            mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2),
+        ]
     )
 
 
@@ -189,29 +193,30 @@ def _(
     else:
         _stats = mo.md("_No matching chunks._")
 
-    mo.md(
-        f"""
-        ## 1. Hybrid Search: BM25 Keyword + Vector Similarity + Reciprocal Rank Fusion (RRF)
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 1. Hybrid Search: BM25 Keyword + Vector Similarity + Reciprocal Rank Fusion (RRF)
 
-        **Reciprocal Rank Fusion (RRF)** combines the rank positions from **Okapi BM25** (exact keyword match)
-        and **Cosine Similarity** (semantic meaning) without needing to normalize incompatible raw score scales:
+                **Reciprocal Rank Fusion (RRF)** combines the rank positions from **Okapi BM25** (exact keyword match)
+                and **Cosine Similarity** (semantic meaning) without needing to normalize incompatible raw score scales:
 
-        $$\\text{{RRF\\_Score}}(d) = \\frac{{\\alpha}}{{k + \\text{{rank}}_{{\\text{{vector}}}}(d)}} + \\frac{{1 - \\alpha}}{{k + \\text{{rank}}_{{\\text{{bm25}}}}(d)}}$$
+                $$\\text{RRF\\_Score}(d) = \\frac{\\alpha}{k + \\text{rank}_{\\text{vector}}(d)} + \\frac{1 - \\alpha}{k + \\text{rank}_{\\text{bm25}}(d)}$$
 
-        Drag **Fusion Weight $\\alpha$** and **RRF Constant $k$** below to watch the **Stacked RRF Decomposition Bars**
-        (left) and the **Rank Discount Curve** (right) shift in real time:
-
-        {hybrid_preset}
-        {mo.hstack([hybrid_alpha_slider, hybrid_rrf_k], justify="start", gap=2)}
-
-        {_stats}
-
-        {mo.Html(_rrf_svg)}
-
-        | Hybrid Rank | Fused `RRF_Score` | Vector Rank (Score) | BM25 Rank (Score) | Source Section | Excerpt |
-        | :--- | :--- | :--- | :--- | :--- | :--- |
-        {_rows}
-        """
+                Drag **Fusion Weight $\\alpha$** and **RRF Constant $k$** below to watch the **Stacked RRF Decomposition Bars**
+                (left) and the **Rank Discount Curve** (right) shift in real time:
+                """
+            ),
+            hybrid_preset,
+            mo.hstack([hybrid_alpha_slider, hybrid_rrf_k], justify="start", gap=2),
+            _stats,
+            mo.Html(_rrf_svg),
+            mo.md(
+                "| Hybrid Rank | Fused `RRF_Score` | Vector Rank (Score) | BM25 Rank (Score) | Source Section | Excerpt |\n"
+                "| :--- | :--- | :--- | :--- | :--- | :--- |\n" + _rows
+            ),
+        ]
     )
 
 
@@ -292,26 +297,28 @@ def _(
             f"| **#{_item.stage2_rank}** | {_shift_badge} | `{_item.rerank_score:.4f}` | `{html.escape(_item.doc_source)}` > **{html.escape(_item.section_title).replace('|', '\\|')}** | _{html.escape(_item.explanation).replace('|', '\\|')}_ |"
         )
 
-    mo.md(
-        f"""
-        ## 2. Cross-Encoder Reranking (`STAGE2-RERANK-15to3`)
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 2. Cross-Encoder Reranking (`STAGE2-RERANK-15to3`)
 
-        Bi-encoders embed the query and each chunk **separately**, which is fast for searching thousands of rows
-        in DuckDB, but misses fine-grained token-to-token interactions.
-        A **Cross-Encoder Reranker** scores each candidate `(query, chunk)` pair together, promoting direct
-        answers above the **Top-$K$ Cutoff Line** and pushing down noisy distractors!
-
-        {rerank_query_input}
-        {mo.hstack([rerank_top_k, rerank_inspect_slot], justify="start", gap=3)}
-
-        {mo.Html(_slopegraph_html)}
-
-        {mo.Html(_attn_html)}
-
-        | Stage-2 Rank | Rank Shift from Stage-1 | Cross-Encoder Score | Document & Section | Reranker Interaction Signals |
-        | :--- | :--- | :--- | :--- | :--- |
-        {chr(10).join(_rerank_rows)}
-        """
+                Bi-encoders embed the query and each chunk **separately**, which is fast for searching thousands of rows
+                in DuckDB, but misses fine-grained token-to-token interactions.
+                A **Cross-Encoder Reranker** scores each candidate `(query, chunk)` pair together, promoting direct
+                answers above the **Top-$K$ Cutoff Line** and pushing down noisy distractors!
+                """
+            ),
+            rerank_query_input,
+            mo.hstack([rerank_top_k, rerank_inspect_slot], justify="start", gap=3),
+            mo.Html(_slopegraph_html),
+            mo.Html(_attn_html),
+            mo.md(
+                "| Stage-2 Rank | Rank Shift from Stage-1 | Cross-Encoder Score | Document & Section | Reranker Interaction Signals |\n"
+                "| :--- | :--- | :--- | :--- | :--- |\n"
+                + "\n".join(_rerank_rows)
+            ),
+        ]
     )
 
 
@@ -365,35 +372,47 @@ def _(
         label="AgenticTrace",
     )
 
-    mo.md(
-        f"""
-        ## 3. Agentic RAG: Live Execution Graph, Iterative Lookup & Verification
+    _ans_quoted = (
+        "\n".join(
+            f"> {line}" if line else ">"
+            for line in html.escape(_trace.final_answer).splitlines()
+        )
+        or "> "
+    )
 
-        Notice what happens when a user asks a **multi-hop question** that spans multiple documents
-        (e.g., *DuckDB error codes* in `02_duckdb_vectors.md` **AND** *Cross-Encoder patterns* in `03_production_rag_patterns.md`).
-        Try removing `"and how..."` from the query below to see the **Mermaid Execution Graph** collapse from a multi-branch plan into a single-hop lookup!
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 3. Agentic RAG: Live Execution Graph, Iterative Lookup & Verification
 
-        {agentic_query_input}
-
-        ### Live Agentic Execution Flowchart (`mo.mermaid`)
-        {_mermaid_diagram}
-
-        ### Step 1 & 2: Sub-Query Planner & Iterative Retrieval
-        - **Multi-Hop Detected**: `{_trace.is_multi_hop}` · **Planned Sub-Queries ({len(_trace.planned_sub_queries)})**: {", ".join(f"`{html.escape(sq)}`" for sq in _trace.planned_sub_queries)}
-        - **Sufficiency Audit**: {"✅ Passed" if _trace.sufficiency_passed else "⚠️ Low Confidence"} — _{html.escape(_trace.sufficiency_note)}_
-
-        | Step | Sub-Query Executed | Planner Reason | Top Reranked Evidence | Cross-Encoder Score |
-        | :--- | :--- | :--- | :--- | :--- |
-        {_step_rows}
-
-        ### Step 3: Grounded Answer (`{_trace.llm_model_used}` · `{_trace.latency_ms:.0f} ms`)
-        > {html.escape(_trace.final_answer)}
-
-        ### Step 4: Self-Reflection & Faithfulness Verification
-        {mo.Html(_audit_html)}
-
-        {mo.accordion({"🌳 Inspect Raw AgenticTrace Object (`mo.tree`)": _trace_tree})}
-        """
+                Notice what happens when a user asks a **multi-hop question** that spans multiple documents
+                (e.g., *DuckDB error codes* in `02_duckdb_vectors.md` **AND** *Cross-Encoder patterns* in `03_production_rag_patterns.md`).
+                Try removing `"and how..."` from the query below to see the **Mermaid Execution Graph** collapse from a multi-branch plan into a single-hop lookup!
+                """
+            ),
+            agentic_query_input,
+            mo.md("### Live Agentic Execution Flowchart (`mo.mermaid`)"),
+            _mermaid_diagram,
+            mo.md(
+                "### Step 1 & 2: Sub-Query Planner & Iterative Retrieval\n"
+                f"- **Multi-Hop Detected**: `{_trace.is_multi_hop}` · **Planned Sub-Queries ({len(_trace.planned_sub_queries)})**: "
+                + ", ".join(f"`{html.escape(sq)}`" for sq in _trace.planned_sub_queries)
+                + f"\n- **Sufficiency Audit**: {'✅ Passed' if _trace.sufficiency_passed else '⚠️ Low Confidence'} — _{html.escape(_trace.sufficiency_note)}_\n\n"
+                "| Step | Sub-Query Executed | Planner Reason | Top Reranked Evidence | Cross-Encoder Score |\n"
+                "| :--- | :--- | :--- | :--- | :--- |\n"
+                + _step_rows
+            ),
+            mo.md(
+                f"### Step 3: Grounded Answer (`{html.escape(_trace.llm_model_used)}` · `{_trace.latency_ms:.0f} ms`)\n\n"
+                + _ans_quoted
+            ),
+            mo.md("### Step 4: Self-Reflection & Faithfulness Verification"),
+            mo.Html(_audit_html),
+            mo.accordion(
+                {"🌳 Inspect Raw AgenticTrace Object (`mo.tree`)": _trace_tree}
+            ),
+        ]
     )
 
 
