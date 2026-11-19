@@ -82,6 +82,7 @@ def _(llm_client, mo):
 def _(
     corpus_chunks,
     graph_store,
+    html,
     is_online,
     mo,
     model_dropdown,
@@ -93,24 +94,28 @@ def _(
         if is_online
         else "🟡 **Offline Educational Fallback Active**"
     )
-    mo.md(
-        f"""
-        # 🕸️ RAG Tutor — Notebook 5: Advanced Graph, Hybrid & Modular RAG
-        ### *Parallel Retrieval, Score Fusion (RRF vs. Convex), Query Expansion (`HyDE` & `Multi-Query`) & Knowledge Graphs*
+    mo.vstack(
+        [
+            mo.md(
+                """
+                # 🕸️ RAG Tutor — Notebook 5: Advanced Graph, Hybrid & Modular RAG
+                ### *Parallel Retrieval, Score Fusion (RRF vs. Convex), Query Expansion (`HyDE` & `Multi-Query`) & Knowledge Graphs*
 
-        Modern production retrieval goes far beyond a single vector lookup. **Modular RAG** combines
-        multiple specialized retrieval engines in parallel, normalizes and merges their rankings, and
-        wraps retrieval in pre- and post-retrieval refinement stages:
+                Modern production retrieval goes far beyond a single vector lookup. **Modular RAG** combines
+                multiple specialized retrieval engines in parallel, normalizes and merges their rankings, and
+                wraps retrieval in pre- and post-retrieval refinement stages:
 
-        1. **Stage 1 — Parallel Retrieval**: **Dense + Sparse** (`BM25` / `SPLADE`), **Vector + Knowledge Graph (`GraphRAG`)**, and **Vector + SQL/Metadata Filtering**.
-        2. **Stage 2 — Score Fusion**: **Reciprocal Rank Fusion (`RRF-K60`)** vs. **Weighted Linear (Convex) Combination** (`α * norm_vector + (1 - α) * norm_bm25`).
-        3. **Stage 3 — Pre- & Post-Retrieval Refinement**: **Query Expansion (`HyDE` & `Multi-Query`)** and **Cross-Encoder Reranking** (`Top-50 -> Top-5`).
-
-        ---
-        **Corpus Loaded**: `{len(corpus_chunks)}` chunks indexed in DuckDB · `{len(graph_store.triples)}` Knowledge Graph triples extracted
-        **Local LLM Backend**: {_badge} — _{status_msg}_
-        {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
-        """
+                1. **Stage 1 — Parallel Retrieval**: **Dense + Sparse** (`BM25` / `SPLADE`), **Vector + Knowledge Graph (`GraphRAG`)**, and **Vector + SQL/Metadata Filtering**.
+                2. **Stage 2 — Score Fusion**: **Reciprocal Rank Fusion (`RRF-K60`)** vs. **Weighted Linear (Convex) Combination** (`α * norm_vector + (1 - α) * norm_bm25`).
+                3. **Stage 3 — Pre- & Post-Retrieval Refinement**: **Query Expansion (`HyDE` & `Multi-Query`)** and **Cross-Encoder Reranking** (`Top-50 -> Top-5`).
+                """
+            ),
+            mo.md(
+                f"---\n**Corpus Loaded**: `{len(corpus_chunks)}` chunks indexed in DuckDB · `{len(graph_store.triples)}` Knowledge Graph triples extracted\n\n"
+                f"**Local LLM Backend**: {_badge} — _{html.escape(status_msg)}_"
+            ),
+            mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2),
+        ]
     )
 
 
@@ -144,7 +149,13 @@ def _(metadata_vals, mo):
         value=2,
         label="Knowledge Graph Max Hops:",
     )
-    return dept_filter, graph_hops_ctl, min_year_filter, parallel_query_input
+    return (
+        dept_filter,
+        dept_options,
+        graph_hops_ctl,
+        min_year_filter,
+        parallel_query_input,
+    )
 
 
 @app.cell
@@ -159,6 +170,15 @@ def _(
     render_subgraph_traversal_svg,
     store,
 ):
+    def _rank_rows(hits, fmt: str) -> str:
+        return (
+            "\n".join(
+                f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:{fmt}}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
+                for i, r in enumerate(hits)
+            )
+            or "| — | — | — | _Enter a query to search_ |"
+        )
+
     _q = parallel_query_input.value
     _dense_hits = store.search_vector(_q, top_k=5)
     _sparse_hits = store.search_bm25(_q, top_k=5)
@@ -174,20 +194,8 @@ def _(
         min_year=min_year_filter.value,
     )
 
-    _dense_rows = (
-        "\n".join(
-            f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.4f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
-            for i, r in enumerate(_dense_hits)
-        )
-        or "| — | — | — | _Enter a query to search_ |"
-    )
-    _sparse_rows = (
-        "\n".join(
-            f"| **#{i + 1}** | Chunk #{r.chunk_id} | `{r.score:.3f}` | `{html.escape(r.doc_source)}` > **{html.escape(r.section_title).replace('|', '\\|')}** |"
-            for i, r in enumerate(_sparse_hits)
-        )
-        or "| — | — | — | _Enter a query to search_ |"
-    )
+    _dense_rows = _rank_rows(_dense_hits, ".4f")
+    _sparse_rows = _rank_rows(_sparse_hits, ".3f")
     _graph_svg = render_subgraph_traversal_svg(_graph_res)
     _triple_rows = (
         "\n".join(
@@ -207,23 +215,15 @@ def _(
 
     _tabs = mo.ui.tabs(
         {
-            "1️⃣ Dense + Sparse Search": mo.vstack(
-                [
-                    mo.md(
-                        f"""
-                        **Dense Vector Search** (`DuckDB FLOAT[128]`) captures conceptual meaning and synonyms,
-                        while **Sparse Search** (`Okapi BM25`) catches exact error codes, identifiers, and acronyms.
-
-                        | Dense Rank | Chunk | Cosine Score | Source Section |
-                        | :--- | :--- | :--- | :--- |
-                        {_dense_rows}
-
-                        | Sparse Rank | Chunk | BM25 Score | Source Section |
-                        | :--- | :--- | :--- | :--- |
-                        {_sparse_rows}
-                        """
-                    )
-                ]
+            "1️⃣ Dense + Sparse Search": mo.md(
+                "**Dense Vector Search** (`DuckDB FLOAT[128]`) captures conceptual meaning and synonyms, "
+                "while **Sparse Search** (`Okapi BM25`) catches exact error codes, identifiers, and acronyms.\n\n"
+                "| Dense Rank | Chunk | Cosine Score | Source Section |\n"
+                "| :--- | :--- | :--- | :--- |\n"
+                f"{_dense_rows}\n\n"
+                "| Sparse Rank | Chunk | BM25 Score | Source Section |\n"
+                "| :--- | :--- | :--- | :--- |\n"
+                f"{_sparse_rows}"
             ),
             "2️⃣ Vector + Knowledge Graph (GraphRAG)": mo.vstack(
                 [
@@ -232,46 +232,50 @@ def _(
                     ),
                     mo.Html(_graph_svg),
                     mo.md(
-                        f"""
-                        | Hop | Subject | Predicate | Object | Grounded Source Chunk |
-                        | :--- | :--- | :--- | :--- | :--- |
-                        {_triple_rows}
-                        """
+                        "| Hop | Subject | Predicate | Object | Grounded Source Chunk |\n"
+                        "| :--- | :--- | :--- | :--- | :--- |\n"
+                        + _triple_rows
                     ),
                 ]
             ),
             "3️⃣ Vector + SQL / Metadata Filtering": mo.vstack(
                 [
                     mo.md(
-                        f"""
-                        Narrow the candidate space with structured DuckDB SQL predicates **alongside** `array_cosine_similarity`:
-                        ```sql
-                        {_sql_str}
-                        -- Bound parameters: {_sql_params!r}
-                        ```
-
-                        | Rank | Chunk | `department` | `updated_year` | Cosine Score | Source Section |
-                        | :--- | :--- | :--- | :--- | :--- | :--- |
-                        {_sql_rows}
-                        """
-                    )
+                        "Narrow the candidate space with structured DuckDB SQL predicates **alongside** `array_cosine_similarity`:"
+                    ),
+                    mo.Html(
+                        '<pre style="background:#020617;color:#e2e8f0;padding:10px 12px;border-radius:8px;'
+                        'border:1px solid #1e293b;white-space:pre-wrap;font-size:12px;">'
+                        f"{html.escape(_sql_str)}\n-- Bound parameters: {html.escape(repr(_sql_params))}</pre>"
+                    ),
+                    mo.md(
+                        "| Rank | Chunk | `department` | `updated_year` | Cosine Score | Source Section |\n"
+                        "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+                        + _sql_rows
+                    ),
                 ]
             ),
         }
     )
 
-    mo.md(
-        f"""
-        ## 1. Stage 1: Parallel Retrieval Techniques
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 1. Stage 1: Parallel Retrieval Techniques
 
-        At the search stage, a Hybrid / Modular RAG system queries multiple specialized engines simultaneously.
-        Adjust the query, SQL metadata filters, and graph traversal depth below, then inspect each tab:
-
-        {parallel_query_input}
-        {mo.hstack([dept_filter, min_year_filter, graph_hops_ctl], justify="start", gap=2)}
-
-        {_tabs}
-        """
+                At the search stage, a Hybrid / Modular RAG system queries multiple specialized engines simultaneously.
+                Adjust the query, SQL metadata filters, and graph traversal depth below, then inspect each tab:
+                """
+            ),
+            parallel_query_input,
+            mo.hstack(
+                [dept_filter, min_year_filter, graph_hops_ctl],
+                justify="start",
+                gap=2,
+            ),
+            _tabs,
+        ]
     )
 
 
@@ -332,28 +336,33 @@ def _(
         for r in _conv_res
     )
 
-    mo.md(
-        f"""
-        ## 2. Stage 2: Score Fusion Arena — `RRF` vs. `Convex Combination`
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 2. Stage 2: Score Fusion Arena — `RRF` vs. `Convex Combination`
 
-        Because cosine similarity (`[-1, 1]`) and Okapi BM25 (`[0, ∞)`) sit on incompatible scales:
-        - **Reciprocal Rank Fusion (`RRF`)** ignores raw scores and blends **rank positions**: $\\frac{{\\alpha}}{{k + \\text{{rank}}_{{\\text{{vec}}}}}} + \\frac{{1 - \\alpha}}{{k + \\text{{rank}}_{{\\text{{bm25}}}}}}$
-        - **Weighted Linear (Convex) Combination** Min-Max normalizes both signals to $[0, 1]$ first, then computes $\\alpha \\cdot \\hat{{S}}_{{\\text{{vec}}}} + (1 - \\alpha) \\cdot \\hat{{S}}_{{\\text{{bm25}}}}$ (e.g., **70% Vector + 30% Keyword** at $\\alpha = 0.7$).
-
-        {fusion_query_preset}
-        {mo.hstack([fusion_alpha_slider, fusion_rrf_k_slider], justify="start", gap=2)}
-
-        {mo.Html(_fusion_svg)}
-
-        | Convex Rank | Chunk | Raw → Norm Vector | Raw → Norm BM25 | Convex Score | RRF Score | Source Section |
-        | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-        {_conv_rows}
-        """
+                Because cosine similarity (`[-1, 1]`) and Okapi BM25 (`[0, ∞)`) sit on incompatible scales:
+                - **Reciprocal Rank Fusion (`RRF`)** ignores raw scores and blends **rank positions**: $\\frac{\\alpha}{k + \\text{rank}_{\\text{vec}}} + \\frac{1 - \\alpha}{k + \\text{rank}_{\\text{bm25}}}$
+                - **Weighted Linear (Convex) Combination** Min-Max normalizes both signals to $[0, 1]$ first, then computes $\\alpha \\cdot \\hat{S}_{\\text{vec}} + (1 - \\alpha) \\cdot \\hat{S}_{\\text{bm25}}$ (e.g., **70% Vector + 30% Keyword** at $\\alpha = 0.7$).
+                """
+            ),
+            fusion_query_preset,
+            mo.hstack(
+                [fusion_alpha_slider, fusion_rrf_k_slider], justify="start", gap=2
+            ),
+            mo.Html(_fusion_svg),
+            mo.md(
+                "| Convex Rank | Chunk | Raw → Norm Vector | Raw → Norm BM25 | Convex Score | RRF Score | Source Section |\n"
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+                + _conv_rows
+            ),
+        ]
     )
 
 
 @app.cell
-def _(metadata_vals, mo):
+def _(dept_options, mo):
     modular_query_input = mo.ui.text(
         value="What are the best practices for tuning keyword vs vector weights and adding a reranker with HyDE or GraphRAG?",
         label="End-to-End Modular RAG Query:",
@@ -385,12 +394,8 @@ def _(metadata_vals, mo):
     modular_rerank_ctl = mo.ui.switch(
         value=True, label="Enable Stage-2 Cross-Encoder Reranking"
     )
-    _dept_opts = {
-        "All Departments": "all",
-        **{d: d for d in metadata_vals["departments"]},
-    }
     modular_dept_ctl = mo.ui.dropdown(
-        options=_dept_opts,
+        options=dept_options,
         value="All Departments",
         label="SQL Metadata Department:",
     )
@@ -461,9 +466,13 @@ def _(
         )
     elif _trace.expansion.mode == "hyde":
         _exp_block = mo.callout(
-            mo.md(
-                "**HyDE Hypothetical Document Embedded for Dense Search**:\n\n"
-                f"> {html.escape(_trace.expansion.hypothetical_doc)}"
+            mo.vstack(
+                [
+                    mo.md("**HyDE Hypothetical Document Embedded for Dense Search**:"),
+                    mo.Html(
+                        f'<div style="white-space:pre-wrap;">{html.escape(_trace.expansion.hypothetical_doc)}</div>'
+                    ),
+                ]
             ),
             kind="info",
         )
@@ -478,31 +487,47 @@ def _(
         or "| — | — | — | — | — | _No candidates retrieved_ |"
     )
 
-    mo.md(
-        f"""
-        ## 3. Stage 3 & Full Modular RAG Composer (`HyDE`, `Multi-Query` & Cross-Encoder Reranking)
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ## 3. Stage 3 & Full Modular RAG Composer (`HyDE`, `Multi-Query` & Cross-Encoder Reranking)
 
-        Toggle **Query Expansion**, **Knowledge Graph**, **Score Fusion**, **SQL Metadata Filtering**, and **Cross-Encoder Reranking**
-        below to watch the **Modular RAG Architecture** rewire and inspect the final grounded answer:
-
-        {modular_query_input}
-        {mo.hstack([expansion_mode_ctl, modular_fusion_ctl, modular_dept_ctl], justify="start", gap=2)}
-        {mo.hstack([modular_alpha_ctl, modular_enable_graph_ctl, modular_rerank_ctl], justify="start", gap=3)}
-
-        ### Live Modular Pipeline Architecture (`mo.mermaid`)
-        {_mermaid}
-
-        ### Pre-Retrieval Expansion Output
-        {_exp_block}
-
-        ### Final Ranked Context Sent to LLM (`{len(_trace.final_candidates)}` Chunks)
-        | Rank | Chunk | Active Retrieval Provenance | Stage-1/2 Fused Score | Stage-2 Rerank Score | Document & Section |
-        | :--- | :--- | :--- | :--- | :--- | :--- |
-        {_cand_rows}
-
-        ### Grounded Answer (`{_trace.llm_model_used}` · `{_trace.latency_ms:.0f} ms`)
-        {mo.callout(mo.md(html.escape(_trace.final_answer)), kind="success")}
-        """
+                Toggle **Query Expansion**, **Knowledge Graph**, **Score Fusion**, **SQL Metadata Filtering**, and **Cross-Encoder Reranking**
+                below to watch the **Modular RAG Architecture** rewire and inspect the final grounded answer:
+                """
+            ),
+            modular_query_input,
+            mo.hstack(
+                [expansion_mode_ctl, modular_fusion_ctl, modular_dept_ctl],
+                justify="start",
+                gap=2,
+            ),
+            mo.hstack(
+                [modular_alpha_ctl, modular_enable_graph_ctl, modular_rerank_ctl],
+                justify="start",
+                gap=3,
+            ),
+            mo.md("### Live Modular Pipeline Architecture (`mo.mermaid`)"),
+            _mermaid,
+            mo.md("### Pre-Retrieval Expansion Output"),
+            _exp_block,
+            mo.md(
+                f"### Final Ranked Context Sent to LLM (`{len(_trace.final_candidates)}` Chunks)\n"
+                "| Rank | Chunk | Active Retrieval Provenance | Stage-1/2 Fused Score | Stage-2 Rerank Score | Document & Section |\n"
+                "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+                + _cand_rows
+            ),
+            mo.md(
+                f"### Grounded Answer (`{html.escape(_trace.llm_model_used)}` · `{_trace.latency_ms:.0f} ms`)"
+            ),
+            mo.callout(
+                mo.Html(
+                    f'<div style="white-space:pre-wrap;">{html.escape(_trace.final_answer)}</div>'
+                ),
+                kind="success",
+            ),
+        ]
     )
 
 

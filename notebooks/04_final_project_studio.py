@@ -41,23 +41,26 @@ def _():
     base_corpus = load_sample_markdown_corpus(
         strategy="markdown", chunk_size=480, chunk_overlap=70
     )
+    duck_store = DuckDBVectorStore()
+    hybrid_engine = HybridSearchEngine(duck_store)
+    reranker = CrossEncoderReranker()
     return (
         AgenticRAGPipeline,
-        CrossEncoderReranker,
-        DuckDBVectorStore,
-        HybridSearchEngine,
         SimpleVectorDB,
         base_corpus,
         build_rag_prompt,
         build_studio_pipeline_mermaid,
         chunk_document,
         dataclasses,
+        duck_store,
         embedder,
         html,
+        hybrid_engine,
         llm_client,
         mo,
         render_ab_arena_comparison_svg,
         render_chunk_timeline_svg,
+        reranker,
     )
 
 
@@ -126,27 +129,65 @@ def _(mo):
 
 @app.cell
 def _(
-    AgenticRAGPipeline,
-    CrossEncoderReranker,
-    DuckDBVectorStore,
-    HybridSearchEngine,
     SimpleVectorDB,
     base_corpus,
-    build_rag_prompt,
-    build_studio_pipeline_mermaid,
     chunk_document,
     chunk_strategy_ctl,
     custom_doc_editor,
     dataclasses,
+    duck_store,
+    embedder,
+    render_chunk_timeline_svg,
+):
+    _target_size = 450 if chunk_strategy_ctl.value == "fixed" else 480
+    custom_chunks = chunk_document(
+        custom_doc_editor.value,
+        strategy=chunk_strategy_ctl.value,
+        chunk_size=_target_size,
+        chunk_overlap=60,
+        doc_source="custom_runbook.md",
+    )
+    custom_timeline_svg = render_chunk_timeline_svg(
+        raw_text=custom_doc_editor.value,
+        chunks=custom_chunks,
+        strategy_name=chunk_strategy_ctl.value,
+        target_chunk_size=_target_size,
+    )
+    combined_chunks = [
+        *base_corpus,
+        *(
+            dataclasses.replace(_c, chunk_id=len(base_corpus) + _i + 1)
+            for _i, _c in enumerate(custom_chunks)
+        ),
+    ]
+    scratch_db = SimpleVectorDB()
+    scratch_db.index_chunks([_c.text for _c in combined_chunks], embedder.embed)
+    duck_store.index_chunks(combined_chunks, replace=True)
+    return combined_chunks, custom_chunks, custom_timeline_svg, scratch_db
+
+
+@app.cell
+def _(
+    AgenticRAGPipeline,
+    base_corpus,
+    build_rag_prompt,
+    build_studio_pipeline_mermaid,
+    chunk_strategy_ctl,
+    combined_chunks,
+    custom_chunks,
+    custom_doc_editor,
+    custom_timeline_svg,
     embedder,
     html,
     hybrid_alpha_ctl,
+    hybrid_engine,
     is_online,
     llm_client,
     mo,
     model_dropdown,
     render_ab_arena_comparison_svg,
-    render_chunk_timeline_svg,
+    reranker,
+    scratch_db,
     status_msg,
     studio_query_input,
     thinking_toggle,
@@ -154,36 +195,24 @@ def _(
     use_agentic_ctl,
     use_reranker_ctl,
 ):
-    _target_size = 450 if chunk_strategy_ctl.value == "fixed" else 480
-    _custom_chunks = chunk_document(
-        custom_doc_editor.value,
-        strategy=chunk_strategy_ctl.value,
-        chunk_size=_target_size,
-        chunk_overlap=60,
-        doc_source="custom_runbook.md",
-    )
+    def _to_prod_chunks(items) -> list[tuple[str, float, str]]:
+        return [
+            (
+                f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
+                float(
+                    c.rerank_score
+                    if hasattr(c, "rerank_score")
+                    else c.rrf_score
+                ),
+                c.text,
+            )
+            for c in items
+        ]
 
-    _custom_timeline_svg = render_chunk_timeline_svg(
-        raw_text=custom_doc_editor.value,
-        chunks=_custom_chunks,
-        strategy_name=chunk_strategy_ctl.value,
-        target_chunk_size=_target_size,
-    )
-
-    _combined = [
-        *base_corpus,
-        *(
-            dataclasses.replace(_c, chunk_id=len(base_corpus) + _i + 1)
-            for _i, _c in enumerate(_custom_chunks)
-        ),
-    ]
-
-    _scratch_db = SimpleVectorDB()
-    _scratch_db.index_chunks([_c.text for _c in _combined], embedder.embed)
     _query_clean = studio_query_input.value.strip()
     _q_vec = embedder.embed(_query_clean)
     _baseline_hits = (
-        _scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value) if _query_clean else []
+        scratch_db.retrieve(_q_vec, top_n=top_k_ctl.value) if _query_clean else []
     )
     _base_sys, _base_usr = build_rag_prompt(_query_clean, _baseline_hits)
     _base_ans = llm_client.generate(
@@ -194,72 +223,47 @@ def _(
         retrieved_context=[t for t, _ in _baseline_hits],
     )
 
-    with DuckDBVectorStore() as _store:
-        _store.index_chunks(_combined)
-        _hybrid = HybridSearchEngine(_store)
-        _reranker = CrossEncoderReranker()
-
-        if use_agentic_ctl.value:
-            _agent = AgenticRAGPipeline(_hybrid, _reranker, llm_client)
-            _trace = _agent.run(
-                query=studio_query_input.value,
-                model=model_dropdown.value,
-                enable_thinking=thinking_toggle.value,
-                final_top_k=top_k_ctl.value,
-            )
-            _prod_answer = _trace.final_answer
-            _prod_chunks = [
-                (
-                    f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
-                    c.rerank_score,
-                    c.text,
-                )
-                for c in _trace.final_context_chunks
-            ]
-            _prod_meta = (
-                f"Sub-queries: {len(_trace.planned_sub_queries)} · "
-                f"Faithfulness: {_trace.faithfulness_score:.0%}"
-            )
-        else:
-            _s1 = _hybrid.search(
-                studio_query_input.value,
-                top_k=max(10, top_k_ctl.value * 3),
-                alpha=hybrid_alpha_ctl.value,
-            )
-            if use_reranker_ctl.value:
-                _s2 = _reranker.rerank(
-                    studio_query_input.value, _s1, top_k=top_k_ctl.value
-                )
-                _prod_chunks = [
-                    (
-                        f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
-                        c.rerank_score,
-                        c.text,
-                    )
-                    for c in _s2
-                ]
-            else:
-                _prod_chunks = [
-                    (
-                        f"Chunk #{c.chunk_id} ({c.doc_source} > {c.section_title})",
-                        c.rrf_score,
-                        c.text,
-                    )
-                    for c in _s1[: top_k_ctl.value]
-                ]
-            _prod_sys, _prod_usr = build_rag_prompt(
-                studio_query_input.value,
-                [(txt, sc) for _, sc, txt in _prod_chunks],
-            )
-            _prod_gen = llm_client.generate(
-                system_prompt=_prod_sys,
-                user_prompt=_prod_usr,
-                model=model_dropdown.value,
-                enable_thinking=thinking_toggle.value,
-                retrieved_context=[txt for _, _, txt in _prod_chunks],
-            )
-            _prod_answer = _prod_gen.content
-            _prod_meta = f"Hybrid α={hybrid_alpha_ctl.value:.1f} · Reranker={'ON' if use_reranker_ctl.value else 'OFF'}"
+    if use_agentic_ctl.value:
+        _agent = AgenticRAGPipeline(hybrid_engine, reranker, llm_client)
+        _trace = _agent.run(
+            query=studio_query_input.value,
+            model=model_dropdown.value,
+            enable_thinking=thinking_toggle.value,
+            final_top_k=top_k_ctl.value,
+            alpha=hybrid_alpha_ctl.value,
+        )
+        _prod_answer = _trace.final_answer
+        _prod_chunks = _to_prod_chunks(_trace.final_context_chunks)
+        _prod_meta = (
+            f"Hybrid α={hybrid_alpha_ctl.value:.1f} · "
+            f"Sub-queries: {len(_trace.planned_sub_queries)} · "
+            f"Faithfulness: {_trace.faithfulness_score:.0%}"
+        )
+    else:
+        _s1 = hybrid_engine.search(
+            studio_query_input.value,
+            top_k=max(10, top_k_ctl.value * 3),
+            alpha=hybrid_alpha_ctl.value,
+        )
+        _selected = (
+            reranker.rerank(studio_query_input.value, _s1, top_k=top_k_ctl.value)
+            if use_reranker_ctl.value
+            else _s1[: top_k_ctl.value]
+        )
+        _prod_chunks = _to_prod_chunks(_selected)
+        _prod_sys, _prod_usr = build_rag_prompt(
+            studio_query_input.value,
+            [(txt, sc) for _, sc, txt in _prod_chunks],
+        )
+        _prod_gen = llm_client.generate(
+            system_prompt=_prod_sys,
+            user_prompt=_prod_usr,
+            model=model_dropdown.value,
+            enable_thinking=thinking_toggle.value,
+            retrieved_context=[txt for _, _, txt in _prod_chunks],
+        )
+        _prod_answer = _prod_gen.content
+        _prod_meta = f"Hybrid α={hybrid_alpha_ctl.value:.1f} · Reranker={'ON' if use_reranker_ctl.value else 'OFF'}"
 
     _pipeline_mermaid = mo.mermaid(
         build_studio_pipeline_mermaid(
@@ -268,7 +272,7 @@ def _(
             use_reranker=use_reranker_ctl.value,
             use_agentic=use_agentic_ctl.value,
             top_k=top_k_ctl.value,
-            total_chunks=len(_combined),
+            total_chunks=len(combined_chunks),
         )
     )
 
@@ -283,9 +287,9 @@ def _(
     _kpis = mo.hstack(
         [
             mo.stat(
-                value=f"{len(_combined)} Chunks",
+                value=f"{len(combined_chunks)} Chunks",
                 label="DuckDB Knowledge Base",
-                caption=f"{len(base_corpus)} core + {len(_custom_chunks)} custom chunks",
+                caption=f"{len(base_corpus)} core + {len(custom_chunks)} custom chunks",
                 bordered=True,
             ),
             mo.stat(
@@ -306,18 +310,30 @@ def _(
     )
 
     _card_a = mo.callout(
-        mo.md(
-            f"**📘 Pipeline A: Basic 50-Line Scratch RAG**\n\n"
-            f"*Storage:* Python `list` · *Retrieval:* Pure Cosine Similarity\n\n"
-            f"{html.escape(_base_ans.content)}"
+        mo.vstack(
+            [
+                mo.md(
+                    "**📘 Pipeline A: Basic 50-Line Scratch RAG**\n\n"
+                    "*Storage:* Python `list` · *Retrieval:* Pure Cosine Similarity"
+                ),
+                mo.Html(
+                    f'<div style="white-space:pre-wrap;">{html.escape(_base_ans.content)}</div>'
+                ),
+            ]
         ),
         kind="info",
     )
     _card_b = mo.callout(
-        mo.md(
-            f"**🚀 Pipeline B: Production RAG ({_prod_meta})**\n\n"
-            f"*Storage:* Embedded DuckDB (`FLOAT[{embedder.dim}]` + BM25)\n\n"
-            f"{html.escape(_prod_answer)}"
+        mo.vstack(
+            [
+                mo.md(
+                    f"**🚀 Pipeline B: Production RAG ({_prod_meta})**\n\n"
+                    f"*Storage:* Embedded DuckDB (`FLOAT[{embedder.dim}]` + BM25)"
+                ),
+                mo.Html(
+                    f'<div style="white-space:pre-wrap;">{html.escape(_prod_answer)}</div>'
+                ),
+            ]
         ),
         kind="success",
     )
@@ -338,7 +354,7 @@ def _(
                     _pipeline_mermaid,
                 ]
             ),
-            "📏 Custom Document Chunking Minimap": mo.Html(_custom_timeline_svg),
+            "📏 Custom Document Chunking Minimap": mo.Html(custom_timeline_svg),
         }
     )
 
@@ -348,39 +364,46 @@ def _(
         else "🟡 **Offline Educational Fallback Active**"
     )
 
-    mo.md(
-        f"""
-        # 🎓 RAG Tutor — Notebook 4: Capstone Final Project Studio
-        ### *Bring Your Own Documents & Compare Basic vs. Production RAG Side-by-Side*
+    mo.vstack(
+        [
+            mo.md(
+                f"""
+                # 🎓 RAG Tutor — Notebook 4: Capstone Final Project Studio
+                ### *Bring Your Own Documents & Compare Basic vs. Production RAG Side-by-Side*
 
-        Congratulations on reaching the **Final Project**! Here you can edit or paste your own custom
-        Markdown knowledge base, configure every stage of your DuckDB + `Llama.app` RAG pipeline, and
-        visually compare **Pipeline A (Basic 50-Line Scratch RAG)** against **Pipeline B (Production RAG)** in real time.
+                Congratulations on reaching the **Final Project**! Here you can edit or paste your own custom
+                Markdown knowledge base, configure every stage of your DuckDB + `Llama.app` RAG pipeline, and
+                visually compare **Pipeline A (Basic 50-Line Scratch RAG)** against **Pipeline B (Production RAG)** in real time.
 
-        **Backend**: {_badge} — _{status_msg}_
-        {mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2)}
-
-        ---
-        ## 1. Knowledge Base Editor (`{len(_combined)}` Total Chunks Indexed in DuckDB)
-        {custom_doc_editor}
-
-        ## 2. Production Pipeline Controls
-        {mo.hstack([chunk_strategy_ctl, hybrid_alpha_ctl, top_k_ctl], justify="start", gap=2)}
-        {mo.hstack([use_reranker_ctl, use_agentic_ctl], justify="start", gap=3)}
-
-        {_kpis}
-
-        ## 3. A/B Pipeline Arena
-        {studio_query_input}
-
-        {_studio_tabs}
-
-        ---
-        ## 🏆 Guided Capstone Challenges
-        1. **Challenge 1 (Exact Identifier Rescue)**: Set **Agentic Multi-Hop** to `OFF`, **Cross-Encoder Reranker** to `OFF`, and slide **Hybrid α** from `1.0` (Pure Vector) down to `0.0` (Pure BM25) while querying `"INC-APOLLO-99"`. Watch how lexical BM25 boosts exact incident codes!
-        2. **Challenge 2 (Add Your Own Knowledge)**: Add a new section `## 3. Team On-Call Schedule` to the Markdown editor above with a specific engineer's name and pager code, then inspect the **Custom Document Chunking Minimap** tab and ask your pipeline who is on call!
-        3. **Challenge 3 (Multi-Hop Synthesis)**: Enable **Agentic Multi-Hop & Verification** and ask a question that combines a fact from your custom runbook with a fact from `02_duckdb_vectors.md`.
-        """
+                **Backend**: {_badge} — _{html.escape(status_msg)}_
+                """
+            ),
+            mo.hstack([model_dropdown, thinking_toggle], justify="start", gap=2),
+            mo.md(
+                f"---\n## 1. Knowledge Base Editor (`{len(combined_chunks)}` Total Chunks Indexed in DuckDB)"
+            ),
+            custom_doc_editor,
+            mo.md("## 2. Production Pipeline Controls"),
+            mo.hstack(
+                [chunk_strategy_ctl, hybrid_alpha_ctl, top_k_ctl],
+                justify="start",
+                gap=2,
+            ),
+            mo.hstack([use_reranker_ctl, use_agentic_ctl], justify="start", gap=3),
+            _kpis,
+            mo.md("## 3. A/B Pipeline Arena"),
+            studio_query_input,
+            _studio_tabs,
+            mo.md(
+                """
+                ---
+                ## 🏆 Guided Capstone Challenges
+                1. **Challenge 1 (Exact Identifier Rescue)**: Set **Agentic Multi-Hop** to `OFF`, **Cross-Encoder Reranker** to `OFF`, and slide **Hybrid α** from `1.0` (Pure Vector) down to `0.0` (Pure BM25) while querying `"INC-APOLLO-99"`. Watch how lexical BM25 boosts exact incident codes!
+                2. **Challenge 2 (Add Your Own Knowledge)**: Add a new section `## 3. Team On-Call Schedule` to the Markdown editor above with a specific engineer's name and pager code, then inspect the **Custom Document Chunking Minimap** tab and ask your pipeline who is on call!
+                3. **Challenge 3 (Multi-Hop Synthesis)**: Enable **Agentic Multi-Hop & Verification** and ask a question that combines a fact from your custom runbook with a fact from `02_duckdb_vectors.md`.
+                """
+            ),
+        ]
     )
 
 
