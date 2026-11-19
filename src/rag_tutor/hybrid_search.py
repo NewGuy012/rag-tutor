@@ -13,7 +13,7 @@ def _min_max_normalize(scores: dict[int, float]) -> dict[int, float]:
         return {}
     lo, hi = min(scores.values()), max(scores.values())
     if hi <= lo:
-        return {k: (1.0 if hi > 0.0 and v > 0.0 else 0.0) for k, v in scores.items()}
+        return dict.fromkeys(scores, 1.0 if hi > 0.0 else 0.0)
     span = hi - lo
     return {k: (v - lo) / span for k, v in scores.items()}
 
@@ -137,6 +137,7 @@ class HybridSearchEngine:
             key=lambda item: (
                 item.fusion_score,
                 item.vector_score * alpha + item.bm25_score * (1.0 - alpha),
+                -item.chunk_id,
             ),
             reverse=True,
         )

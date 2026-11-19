@@ -15,7 +15,8 @@ from .chunker import MIN_CHUNK_CHARS, Chunk
 from .llm_backend import get_default_embedder, tokenize
 
 _FORBIDDEN_SQL_RE = re.compile(
-    r"\b(?:read_\w+|glob|st_read|\w+_scan|duckdb_\w+|pragma_\w+|current_setting|getenv)\b",
+    r"\b(?:read_\w+|glob|st_read|\w+_scan|duckdb_\w+|pragma_\w+|"
+    r"current_setting|getenv|query|query_table|sniff_\w+|from_substrait)\b",
     re.IGNORECASE,
 )
 
@@ -67,6 +68,8 @@ class DuckDBVectorStore:
             );
             """
         )
+        self.conn.execute("SET autoinstall_known_extensions = false;")
+        self.conn.execute("SET autoload_known_extensions = false;")
         self.conn.execute("SET enable_external_access = false;")
         self.conn.execute("SET lock_configuration = true;")
 
@@ -136,7 +139,7 @@ class DuckDBVectorStore:
                 """,
                 rows,
             )
-        return self.count()
+        return len(rows) if replace else self.count()
 
     def count(self) -> int:
         """Return total number of indexed chunks in DuckDB."""
@@ -239,6 +242,10 @@ class DuckDBVectorStore:
         min_year: int | None = None,
     ) -> list[DuckDBChunkRecord]:
         """Compute Okapi BM25 (`BM25-K1-1.2`, `b=0.75`) over chunks stored in DuckDB."""
+        query_terms = list(dict.fromkeys(tokenize(query, stem=False)))
+        if not query_terms:
+            return []
+
         limit = max(1, int(top_k)) if top_k is not None else None
         where_sql, params = self._build_metadata_where(
             department=department,
@@ -257,27 +264,24 @@ class DuckDBVectorStore:
         if not rows:
             return []
 
-        query_terms = list(dict.fromkeys(tokenize(query, stem=False)))
-        if not query_terms:
-            return []
-
         doc_counters = [Counter(tokenize(str(r[3]), stem=False)) for r in rows]
         doc_lens = [sum(c.values()) for c in doc_counters]
         total_docs = len(rows)
-        avg_dl = sum(doc_lens) / max(1, total_docs)
-        df = {qt: sum(1 for c in doc_counters if qt in c) for qt in query_terms}
+        avg_dl = max(1.0, sum(doc_lens) / total_docs)
+        idf_map = {
+            qt: math.log(1.0 + (total_docs - n_q + 0.5) / (n_q + 0.5))
+            for qt in query_terms
+            for n_q in (sum(1 for c in doc_counters if qt in c),)
+        }
 
         scored: list[DuckDBChunkRecord] = []
         for row, tf_counter, dl in zip(rows, doc_counters, doc_lens):
-            bm25_val = 0.0
-            for qt in query_terms:
-                f = tf_counter.get(qt, 0)
-                if f == 0:
-                    continue
-                n_q = df[qt]
-                idf = math.log(1.0 + (total_docs - n_q + 0.5) / (n_q + 0.5))
-                denom = f + k1 * (1.0 - b + b * (dl / max(1.0, avg_dl)))
-                bm25_val += idf * ((f * (k1 + 1.0)) / denom)
+            dl_norm = k1 * (1.0 - b + b * (dl / avg_dl))
+            bm25_val = sum(
+                idf_map[qt] * ((f * (k1 + 1.0)) / (f + dl_norm))
+                for qt in query_terms
+                if (f := tf_counter.get(qt, 0)) > 0
+            )
             scored.append(self._row_to_record(row, round(bm25_val, 5)))
 
         scored.sort(key=lambda item: (item.score, -item.chunk_id), reverse=True)
@@ -299,12 +303,12 @@ class DuckDBVectorStore:
             stmt.query
         ):
             raise ValueError(
-                "Only read-only SELECT/DESCRIBE/SUMMARIZE queries on rag_chunks are permitted."
+                "Only read-only SELECT queries on rag_chunks are permitted."
             )
 
         try:
             rel = self.conn.execute(stmt)
         except duckdb.Error as exc:
             raise ValueError(f"SQL execution error: {exc}") from exc
-        cols = [desc[0] for desc in rel.description]
+        cols = [desc[0] for desc in (rel.description or ())]
         return [dict(zip(cols, row)) for row in rel.fetchmany(max(1, int(max_rows)))]

@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from .hybrid_search import HybridSearchResult
 from .llm_backend import split_sentences, tokenize
 
+_NUM_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
+_TECH_CODE_RE = re.compile(r"\b[A-Z0-9]+-[A-Z0-9-]+\b")
+_NUMERIC_INTENTS = ("how many", "how fast", "speed", "hours", "weight", "record")
+_CODE_INTENTS = ("code", "error", "diagnostic", "pattern", "stage")
+
 
 @dataclass
 class RerankedCandidate:
@@ -48,13 +53,9 @@ class CrossEncoderReranker:
             for sent in sentences
         )
 
-        q_bigrams = {
-            f"{q_tokens[i]} {q_tokens[i + 1]}" for i in range(len(q_tokens) - 1)
-        }
-        c_bigrams = {
-            f"{c_tokens[i]} {c_tokens[i + 1]}" for i in range(len(c_tokens) - 1)
-        }
-        bigram_hits = len(q_bigrams & c_bigrams)
+        bigram_hits = len(
+            set(zip(q_tokens, q_tokens[1:])) & set(zip(c_tokens, c_tokens[1:]))
+        )
         bigram_bonus = min(0.25, bigram_hits * 0.12)
 
         q_lower = query.lower()
@@ -67,16 +68,11 @@ class CrossEncoderReranker:
         if bigram_hits > 0:
             reasons.append(f"{bigram_hits} exact phrase bigram(s)")
 
-        if any(
-            w in q_lower
-            for w in ("how many", "how fast", "speed", "hours", "weight", "record")
-        ) and re.search(r"\b\d+(?:\.\d+)?\b", chunk_text):
+        if any(w in q_lower for w in _NUMERIC_INTENTS) and _NUM_RE.search(chunk_text):
             intent_bonus += 0.14
             reasons.append("numeric answer alignment")
 
-        if any(
-            w in q_lower for w in ("code", "error", "diagnostic", "pattern", "stage")
-        ) and re.search(r"\b[A-Z0-9]+-[A-Z0-9-]+\b", chunk_text):
+        if any(w in q_lower for w in _CODE_INTENTS) and _TECH_CODE_RE.search(chunk_text):
             intent_bonus += 0.16
             reasons.append("exact technical identifier match")
 
