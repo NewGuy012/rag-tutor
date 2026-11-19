@@ -125,6 +125,7 @@ class AgenticRAGPipeline:
         enable_thinking: bool = False,
         stage1_candidates: int = 10,
         final_top_k: int = 3,
+        alpha: float = 0.5,
     ) -> AgenticTrace:
         """Execute the Agentic RAG workflow and return a full `AgenticTrace`."""
         cleaned_query = query.strip()
@@ -142,6 +143,7 @@ class AgenticRAGPipeline:
                 latency_ms=0.0,
             )
 
+        alpha = max(0.0, min(1.0, float(alpha)))
         is_multi_hop, sub_queries = self.decompose_query(cleaned_query)
         retrieval_steps: list[SubQueryStep] = []
         collected_by_id: dict[int, RerankedCandidate] = {}
@@ -155,7 +157,7 @@ class AgenticRAGPipeline:
             step = self._retrieve_step(
                 sq,
                 reason,
-                0.5,
+                alpha,
                 stage1_candidates,
                 len(retrieval_steps) + 1,
                 collected_by_id,
@@ -169,7 +171,7 @@ class AgenticRAGPipeline:
             retry_step = self._retrieve_step(
                 expanded_query,
                 "Initial confidence < 0.55; triggered BM25-weighted iterative retry",
-                0.25,
+                min(0.25, alpha),
                 stage1_candidates,
                 len(retrieval_steps) + 1,
                 collected_by_id,
