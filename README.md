@@ -5,6 +5,73 @@
   <p>Built with <strong>Python</strong> · <strong>Marimo</strong> · <strong>Astral <code>uv</code></strong> · <strong>DuckDB</strong> · <strong><code>llama.cpp</code> (<code>Llama.app</code>)</strong></p>
 </div>
 
+> [!IMPORTANT]
+> **Local Mode Is Preferred (`uv run marimo edit ...`)**: Running these notebooks **locally** on your machine is strongly recommended for the full experience. Live LLM generation (hallucination vs. grounded RAG comparisons, cited synthesis, and online Multi-Query / HyDE expansion) connects to your local `llama.cpp` / `Llama.app` server on `http://localhost:9931`, which is unreachable from a remote `molab` cloud sandbox. Use the **Open in molab** badges below only as quick **read-only previews** of pre-rendered session snapshots.
+
+## ⚡ Quickstart & Prerequisites (Local Mode — Recommended)
+
+### 1. Prerequisites
+
+**Core Local Environment (Required):**
+- **[`git`](https://git-scm.com/)** to clone the repository locally
+- **Python `>=3.15`** (or let `uv` install and manage it for you via `uv python install 3.15`)
+- **[Astral `uv`](https://docs.astral.sh/uv/)** for dependency and virtual-environment management
+- **Python packages (installed automatically by `uv sync`)**:
+  - **[DuckDB](https://duckdb.org/)** (core runtime dependency for vector and full-text search)
+  - **[Marimo](https://marimo.io/)** (`dev` dependency group, required to run the interactive notebooks locally)
+
+**Local LLM Server via `llama.cpp` (Strongly Recommended for Live LLM Inference):**
+- All LLM-powered cells connect to a local OpenAI-compatible [`llama.cpp`](https://github.com/ggml-org/llama.cpp) server at `http://localhost:9931/v1` (loopback only) with a GGUF chat model loaded:
+  - **macOS (Recommended)**: Install [**`Llama.app` (`ggml-org/Llama-macOS`)**](https://github.com/ggml-org/Llama-macOS) in `/Applications/Llama.app` (runs `llama.cpp` natively on port `9931`) and download/select a GGUF chat model (e.g., `ggml-org/gemma-4-E4B-it-GGUF:Q8_0`).
+  - **Linux / Windows / macOS CLI (`llama-server`)**: Install [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp) and launch `llama-server` on port `9931`:
+    ```bash
+    llama-server -hf ggml-org/gemma-4-E4B-it-GGUF:Q8_0 --host 127.0.0.1 --port 9931
+    ```
+  - **Verify your local LLM server**:
+    ```bash
+    curl http://localhost:9931/v1/models
+    ```
+  - *Offline Fallback Mode*: If no `llama.cpp` / `Llama.app` server is running on `localhost:9931`, all five notebooks automatically fall back to a built-in deterministic context synthesizer and local embedding engine so every retrieval, SQL, and visualization widget still works—however, real LLM generation, hallucination demos, and LLM-based query expansion require a live local `llama.cpp` server.
+
+### 2. Clone & Install Environment with `uv`
+```bash
+git clone https://github.com/NewGuy012/rag-tutor.git
+cd rag-tutor
+uv sync
+```
+*(Use `uv sync --no-dev` if you only need the `rag_tutor` library + DuckDB without Marimo.)*
+
+### 3. Launch the Interactive Marimo Notebooks Locally
+
+Open any notebook locally in interactive **edit mode** (recommended—lets you inspect and modify both code and UI widgets while connected to your local `llama.cpp` server):
+
+```bash
+# Notebook 1: RAG Fundamentals & 50-Line Scratch RAG
+uv run marimo edit notebooks/01_rag_fundamentals.py
+
+# Notebook 2: Document Chunking Lab & DuckDB Vector Store
+uv run marimo edit notebooks/02_chunking_and_duckdb.py
+
+# Notebook 3: Hybrid Search, Cross-Encoder Reranking & Agentic RAG
+uv run marimo edit notebooks/03_advanced_rag.py
+
+# Notebook 4: Capstone Final Project — Bring-Your-Own-Docs RAG Studio
+uv run marimo edit notebooks/04_final_project_studio.py
+
+# Notebook 5: Advanced Graph, Hybrid & Modular RAG
+uv run marimo edit notebooks/05_advanced_modular_graph_rag.py
+```
+
+Or launch the Capstone Studio as a clean **web app**:
+```bash
+uv run marimo run notebooks/04_final_project_studio.py
+```
+
+### 4. Run Unit Tests
+```bash
+uv run python -m unittest discover -s tests -v
+```
+
 ---
 
 ## ✨ Overview
@@ -68,78 +135,9 @@ flowchart LR
 | **[`notebooks/04_final_project_studio.py`](notebooks/04_final_project_studio.py)** | [![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/NewGuy012/rag-tutor/blob/master/notebooks/04_final_project_studio.py) | **Part 4: Capstone RAG Studio** | Bring your own Markdown documents, inspect custom chunk minimaps, watch the **Live Pipeline B Mermaid Architecture Diagram** rewire as you flip switches, and compare Basic vs. Production RAG in the **Visual A/B Arena**. |
 | **[`notebooks/05_advanced_modular_graph_rag.py`](notebooks/05_advanced_modular_graph_rag.py)** | [![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/NewGuy012/rag-tutor/blob/master/notebooks/05_advanced_modular_graph_rag.py) | **Part 5: Graph, Hybrid & Modular RAG** | Explore **Parallel Retrieval** (**Dense + Sparse**, **Vector + Knowledge Graph SVG Traversal**, **Vector + SQL Metadata Filters**), compare **RRF vs. Min-Max Convex Combination**, test **HyDE & Multi-Query Expansion**, and compare production vector DBs (Qdrant, Weaviate, Pinecone, Elastic). |
 
-> [!IMPORTANT]
-> **Local Mode Is Preferred (`uv run marimo edit ...`)**: Running these notebooks **locally** on your machine is strongly recommended for the full experience. Live LLM generation (hallucination vs. grounded RAG comparisons, cited synthesis, and online Multi-Query / HyDE expansion) connects to your local `llama.cpp` / `Llama.app` server on `http://localhost:9931`, which is unreachable from a remote `molab` cloud sandbox.
->
-> 💡 **Previewing on `molab`**: The **Open in molab** badges above are best used as quick **read-only previews** of the pre-rendered outputs saved in [`notebooks/__marimo__/session/`](notebooks/__marimo__/session/). To refresh snapshots locally after editing notebooks, run `uv run marimo export session notebooks/`.
+> 💡 **Previewing on `molab`**: The **Open in molab** badges above are best used as quick **read-only previews** of the pre-rendered outputs saved in [`notebooks/__marimo__/session/`](notebooks/__marimo__/session/). For live LLM inference and interactive editing, follow the **Quickstart & Prerequisites** instructions at the top of this README to run the notebooks locally. To refresh snapshots locally after editing notebooks, run `uv run marimo export session notebooks/`.
 
 📖 **Companion Textbook**: Read the standalone [**RAG Reference Guide (`docs/RAG_REFERENCE_GUIDE.md`)**](docs/RAG_REFERENCE_GUIDE.md) for mathematical intuition, SQL cheat sheets, architecture diagrams, and production design patterns.
-
----
-
-## ⚡ Quickstart (Local Mode — Recommended)
-
-### 1. Prerequisites
-
-**Core Local Environment (Required):**
-- **[`git`](https://git-scm.com/)** to clone the repository locally
-- **Python `>=3.15`** (or let `uv` install and manage it for you via `uv python install 3.15`)
-- **[Astral `uv`](https://docs.astral.sh/uv/)** for dependency and virtual-environment management
-- **Python packages (installed automatically by `uv sync`)**:
-  - **[DuckDB](https://duckdb.org/)** (core runtime dependency for vector and full-text search)
-  - **[Marimo](https://marimo.io/)** (`dev` dependency group, required to run the interactive notebooks locally)
-
-**Local LLM Server via `llama.cpp` (Strongly Recommended for Live LLM Inference):**
-- All LLM-powered cells connect to a local OpenAI-compatible [`llama.cpp`](https://github.com/ggml-org/llama.cpp) server at `http://localhost:9931/v1` (loopback only) with a GGUF chat model loaded:
-  - **macOS (Recommended)**: Install [**`Llama.app` (`ggml-org/Llama-macOS`)**](https://github.com/ggml-org/Llama-macOS) in `/Applications/Llama.app` (runs `llama.cpp` natively on port `9931`) and download/select a GGUF chat model (e.g., `ggml-org/gemma-4-E4B-it-GGUF:Q8_0`).
-  - **Linux / Windows / macOS CLI (`llama-server`)**: Install [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp) and launch `llama-server` on port `9931`:
-    ```bash
-    llama-server -hf ggml-org/gemma-4-E4B-it-GGUF:Q8_0 --host 127.0.0.1 --port 9931
-    ```
-  - **Verify your local LLM server**:
-    ```bash
-    curl http://localhost:9931/v1/models
-    ```
-  - *Offline Fallback Mode*: If no `llama.cpp` / `Llama.app` server is running on `localhost:9931`, all five notebooks automatically fall back to a built-in deterministic context synthesizer and local embedding engine so every retrieval, SQL, and visualization widget still works—however, real LLM generation, hallucination demos, and LLM-based query expansion require a live local `llama.cpp` server.
-
-### 2. Clone & Install Environment with `uv`
-```bash
-git clone https://github.com/NewGuy012/rag-tutor.git
-cd rag-tutor
-uv sync
-```
-*(Use `uv sync --no-dev` if you only need the `rag_tutor` library + DuckDB without Marimo.)*
-
-### 3. Launch the Interactive Marimo Notebooks Locally
-
-Open any notebook locally in interactive **edit mode** (recommended—lets you inspect and modify both code and UI widgets while connected to your local `llama.cpp` server):
-
-```bash
-# Notebook 1: RAG Fundamentals & 50-Line Scratch RAG
-uv run marimo edit notebooks/01_rag_fundamentals.py
-
-# Notebook 2: Document Chunking Lab & DuckDB Vector Store
-uv run marimo edit notebooks/02_chunking_and_duckdb.py
-
-# Notebook 3: Hybrid Search, Cross-Encoder Reranking & Agentic RAG
-uv run marimo edit notebooks/03_advanced_rag.py
-
-# Notebook 4: Capstone Final Project — Bring-Your-Own-Docs RAG Studio
-uv run marimo edit notebooks/04_final_project_studio.py
-
-# Notebook 5: Advanced Graph, Hybrid & Modular RAG
-uv run marimo edit notebooks/05_advanced_modular_graph_rag.py
-```
-
-Or launch the Capstone Studio as a clean **web app**:
-```bash
-uv run marimo run notebooks/04_final_project_studio.py
-```
-
-### 4. Run Unit Tests
-```bash
-uv run python -m unittest discover -s tests -v
-```
 
 ---
 
