@@ -6,43 +6,7 @@
 </div>
 
 > [!IMPORTANT]
-> **Local Mode Is Preferred**: Run these notebooks locally with `uv run marimo edit ...`. Live LLM answers and online query expansion (Multi-Query / HyDE) connect to your local `llama.cpp` server on `http://localhost:9931`, which `molab` cloud previews cannot reach. Use **Open in molab** badges only as read-only previews.
-
-## ⚡ Quickstart & Prerequisites
-
-### 1. Prerequisites
-- **Core tools**: [`git`](https://git-scm.com/), **Python `>=3.15`** (auto-managed by `uv` if needed), and **[Astral `uv`](https://docs.astral.sh/uv/)** (installs `duckdb` and `marimo`).
-- **Local LLM via [`llama.cpp`](https://github.com/ggml-org/llama.cpp)** *(recommended for live LLM generation)*:
-  - **macOS**: Install [**`Llama.app` (`ggml-org/Llama-macOS`)**](https://github.com/ggml-org/Llama-macOS) and load a GGUF chat model (e.g. `ggml-org/gemma-4-E4B-it-GGUF:Q8_0`) on port `9931`.
-  - **Linux / Windows / CLI**: Start `llama-server` on port `9931`:
-    ```bash
-    llama-server -hf ggml-org/gemma-4-E4B-it-GGUF:Q8_0 --host 127.0.0.1 --port 9931
-    ```
-  - **Check connection**: `curl http://localhost:9931/v1/models`
-  - *Offline fallback*: Without a running server, notebooks use a deterministic context synthesizer so retrieval, SQL, and visual widgets still work.
-
-### 2. Install & Run Locally
-```bash
-git clone https://github.com/NewGuy012/rag-tutor.git
-cd rag-tutor
-uv sync
-```
-*(Use `uv sync --no-dev` for just the `rag_tutor` library + DuckDB without Marimo.)*
-
-Launch any notebook in interactive **edit mode** (recommended):
-```bash
-uv run marimo edit notebooks/01_rag_fundamentals.py
-uv run marimo edit notebooks/02_chunking_and_duckdb.py
-uv run marimo edit notebooks/03_advanced_rag.py
-uv run marimo edit notebooks/04_final_project_studio.py
-uv run marimo edit notebooks/05_advanced_modular_graph_rag.py
-```
-
-Or run the Capstone Studio as a web app, and verify with unit tests:
-```bash
-uv run marimo run notebooks/04_final_project_studio.py
-uv run python -m unittest discover -s tests -v
-```
+> **Local Mode with `llama.cpp` Is Preferred**: Run these notebooks locally (`uv run marimo edit ...`) with a local **`llama.cpp`** server (`Llama.app` or `llama-server` on `http://localhost:9931`) for live LLM answers; `molab` badges are read-only previews.
 
 ---
 
@@ -54,6 +18,22 @@ uv run python -m unittest discover -s tests -v
 - **Store & Search in DuckDB**: Experiment with document chunking, `FLOAT[128]` vector search, Okapi BM25 keyword search, and SQL metadata filtering.
 - **Add Production Techniques**: Compare Hybrid Search (RRF vs. Convex fusion), Cross-Encoder reranking, Agentic multi-hop verification, GraphRAG, and HyDE / Multi-Query expansion.
 - **Local-First & Inspectable**: Powered by DuckDB, Marimo, and local `llama.cpp` inference—every score, rank shift, prompt, and citation trace is visible in the UI.
+
+---
+
+## ⚡ Quickstart & Prerequisites
+
+- **Prerequisites**: [`git`](https://git-scm.com/), **Python `>=3.15`**, [`uv`](https://docs.astral.sh/uv/) (installs `duckdb` & `marimo`), and a local [`llama.cpp`](https://github.com/ggml-org/llama.cpp) server on `http://localhost:9931` *(optional offline fallback is built in, but `llama.cpp` is preferred)*:
+  - **macOS**: Launch [**`Llama.app`**](https://github.com/ggml-org/Llama-macOS) with a GGUF chat model (e.g. `ggml-org/gemma-4-E4B-it-GGUF:Q8_0`).
+  - **CLI / Linux / Windows**: `llama-server -hf ggml-org/gemma-4-E4B-it-GGUF:Q8_0 --host 127.0.0.1 --port 9931`
+
+```bash
+git clone https://github.com/NewGuy012/rag-tutor.git && cd rag-tutor
+uv sync
+uv run marimo edit notebooks/01_rag_fundamentals.py
+```
+
+- **Other commands**: `uv run marimo run notebooks/04_final_project_studio.py` (app mode) · `uv run python -m unittest discover -s tests -v` (tests) · see **Notebooks** below for `02`–`05`.
 
 ---
 
