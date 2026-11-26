@@ -73,6 +73,42 @@ flowchart LR
 
 ---
 
+## 📸 Screenshots
+
+All screenshots below are captured from local `marimo run` sessions connected to `Llama.app` (`ggml-org/gemma-4-E4B-it-GGUF:Q8_0` on `http://localhost:9931`).
+
+### 1. Fundamentals — 2D Embedding Space & 128-D Barcode ([`01_rag_fundamentals.py`](notebooks/01_rag_fundamentals.py))
+Explore a live PCA projection of 128-D embeddings, Top-N cosine similarity matches, and per-dimension dot-product contributions.
+
+![2D Embedding Space PCA Map and 128-D Barcode Inspector in Notebook 1](assets/screenshots/01-embedding-space.png)
+
+### 2. Chunking & DuckDB — Document Chunking & Overlap Lab ([`02_chunking_and_duckdb.py`](notebooks/02_chunking_and_duckdb.py))
+Compare Markdown section-aware splitting against fixed-character sliding windows with swimlane boundaries and amber overlap zones.
+
+![Interactive Document Chunking Minimap and Overlap Visualizer in Notebook 2](assets/screenshots/02-chunking-lab.png)
+
+### 3. Production RAG — Hybrid Search (`BM25 + Vector + RRF`) ([`03_advanced_rag.py`](notebooks/03_advanced_rag.py))
+Tune fusion weight `α` and RRF smoothing constant `k` to inspect stacked semantic/lexical score contributions and the rank discount curve.
+
+![Hybrid Search Reciprocal Rank Fusion Decomposition and Rank Discount Curve in Notebook 3](assets/screenshots/03-hybrid-rrf.png)
+
+### 4. Production RAG — Agentic Multi-Hop Execution Graph ([`03_advanced_rag.py`](notebooks/03_advanced_rag.py))
+Decompose multi-part questions into sub-queries, inspect the live Mermaid execution graph, and verify retrieval confidence before synthesis.
+
+![Agentic RAG Live Mermaid Execution Flowchart and Sub-Query Planner in Notebook 3](assets/screenshots/03-agentic-rag.png)
+
+### 5. Capstone Studio — Live A/B Pipeline Arena ([`04_final_project_studio.py`](notebooks/04_final_project_studio.py))
+Edit your own Markdown runbooks, toggle production stages live, and compare Basic Scratch RAG against Production RAG side by side.
+
+![Capstone Studio Production Pipeline Controls and A/B Pipeline Arena in Notebook 4](assets/screenshots/04-capstone-arena.png)
+
+### 6. Modular & GraphRAG — `HyDE`, Knowledge Graph & Convex Fusion ([`05_advanced_modular_graph_rag.py`](notebooks/05_advanced_modular_graph_rag.py))
+Compose pre-retrieval query expansion (`HyDE` / Multi-Query), Knowledge Graph traversal, SQL metadata filtering, and Stage-2 reranking.
+
+![Modular RAG Composer with HyDE, Knowledge Graph Traversal, and Convex Blend in Notebook 5](assets/screenshots/05-modular-composer.png)
+
+---
+
 ## 📁 Project Structure
 
 ```text
@@ -80,7 +116,8 @@ rag-tutor/
 ├── pyproject.toml                 # Astral uv project & dependencies
 ├── README.md                      # Quickstart & curriculum overview
 ├── assets/
-│   └── logo.png                   # RAG Tutor project logo
+│   ├── logo.png                   # RAG Tutor project logo
+│   └── screenshots/               # Notebook UI & visualization screenshots
 ├── docs/
 │   └── RAG_REFERENCE_GUIDE.md     # Beginner-to-Production Markdown Reference Guide
 ├── data/
