@@ -2,7 +2,14 @@
   <img src="assets/logo.png" alt="RAG Tutor Logo" width="280"/>
   <h1>🦉 RAG Tutor</h1>
   <p><strong>An Interactive RAG Curriculum &amp; Playground</strong></p>
-  <p>Python · Marimo · Astral <code>uv</code> · DuckDB · <code>llama.cpp</code> (<code>Llama.app</code>)</p>
+  <p>
+    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-%3E%3D3.15-3776AB?logo=python&amp;logoColor=white" alt="Python >=3.15"/></a>
+    <a href="https://duckdb.org/"><img src="https://img.shields.io/badge/DuckDB-%3E%3D2.0.1-FFF000?logo=duckdb&amp;logoColor=white" alt="DuckDB >=2.0.1"/></a>
+    <a href="https://github.com/ggml-org/llama.cpp"><img src="https://img.shields.io/badge/llama.cpp-local%20LLM-EA580C" alt="llama.cpp local LLM"/></a>
+    <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-Astral-DE5FE9?logo=uv&amp;logoColor=white" alt="uv Astral"/></a>
+    <a href="https://marimo.io/"><img src="https://img.shields.io/badge/marimo-%3E%3D0.26.0-008080" alt="marimo >=0.26.0"/></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD--3--Clause-2563EB" alt="License BSD-3-Clause"/></a>
+  </p>
 </div>
 
 > [!IMPORTANT]
